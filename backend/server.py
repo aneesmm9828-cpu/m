@@ -48,9 +48,16 @@ class User(BaseModel):
     picture: Optional[str] = None
     username: Optional[str] = None
     bio: Optional[str] = None
+    pronouns: Optional[str] = None
+    gender: Optional[str] = None
+    link: Optional[str] = None
     followers: List[str] = []
     following: List[str] = []
+    posts_count: int = 0
+    followers_count: int = 0
+    following_count: int = 0
     created_at: datetime
+    last_seen: Optional[datetime] = None
 
 class UserSession(BaseModel):
     user_id: str

@@ -267,10 +267,9 @@ async def process_session(request: Request, response: Response):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/auth/me")
-async def get_me(current_user: User = None):
+async def get_me(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
     """Get current user profile"""
-    if not current_user:
-        current_user = await get_current_user()
+    current_user = await get_current_user(authorization, session_token)
     return current_user
 
 @api_router.post("/auth/logout")

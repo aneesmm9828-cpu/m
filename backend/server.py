@@ -145,6 +145,9 @@ class UpdateProfileRequest(BaseModel):
     username: Optional[str] = None
     bio: Optional[str] = None
     picture: Optional[str] = None
+    pronouns: Optional[str] = None
+    gender: Optional[str] = None
+    link: Optional[str] = None
 
 # =============== HELPER FUNCTIONS ===============
 

@@ -59,6 +59,9 @@ export default function EditProfileScreen() {
         username,
         bio,
         picture: profilePic,
+        pronouns,
+        gender,
+        link,
       });
 
       if (response.data) {

@@ -1,6 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 import { Colors } from '../../constants/colors';
+import { TouchTarget } from '../../constants/layout';
 
 export default function TabsLayout() {
   return (
@@ -11,20 +13,23 @@ export default function TabsLayout() {
           backgroundColor: Colors.cardBackground,
           borderTopWidth: 1,
           borderTopColor: Colors.border,
-          height: 60,
-          paddingBottom: 8,
+          height: Platform.OS === 'ios' ? 85 : 65,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 8,
           paddingTop: 8,
         },
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarShowLabel: false,
+        tabBarItemStyle: {
+          minHeight: TouchTarget.minSize,
+        },
       }}
     >
       <Tabs.Screen
         name="home"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+            <Ionicons name="home" size={26} color={color} />
           ),
         }}
       />
@@ -32,7 +37,7 @@ export default function TabsLayout() {
         name="explore"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
+            <Ionicons name="search" size={26} color={color} />
           ),
         }}
       />
@@ -40,7 +45,7 @@ export default function TabsLayout() {
         name="create"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle" size={size + 8} color={color} />
+            <Ionicons name="add-circle" size={32} color={color} />
           ),
         }}
       />
@@ -48,7 +53,7 @@ export default function TabsLayout() {
         name="messages"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble" size={size} color={color} />
+            <Ionicons name="chatbubble" size={26} color={color} />
           ),
         }}
       />
@@ -56,7 +61,7 @@ export default function TabsLayout() {
         name="profile"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
+            <Ionicons name="person" size={26} color={color} />
           ),
         }}
       />

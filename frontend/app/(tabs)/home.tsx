@@ -164,12 +164,11 @@ export default function HomeScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <LinearGradient
-            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-            style={styles.logoGradient}
-          >
-            <Ionicons name="play" size={20} color={Colors.background} />
-          </LinearGradient>
+          <Image
+            source={require('../../assets/images/marb-logo.jpg')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
           <Text style={styles.headerTitle}>MARB</Text>
         </View>
         <TouchableOpacity>

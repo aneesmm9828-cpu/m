@@ -189,17 +189,38 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {/* Edit Profile Button */}
-          <TouchableOpacity style={styles.editButton} activeOpacity={0.8}>
-            <LinearGradient
-              colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.editButtonGradient}
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <TouchableOpacity 
+              style={styles.editButton} 
+              activeOpacity={0.8}
+              onPress={() => router.push('/profile/edit')}
             >
-              <Text style={styles.editButtonText}>Edit Profile</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.editButtonGradient}
+              >
+                <Text style={styles.editButtonText}>Edit Profile</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.shareButton} 
+              activeOpacity={0.8}
+              onPress={() => router.push('/profile/qr')}
+            >
+              <LinearGradient
+                colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.shareButtonGradient}
+              >
+                <Text style={styles.shareButtonText}>Share Profile</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tabs */}

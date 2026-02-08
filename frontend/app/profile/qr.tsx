@@ -63,7 +63,6 @@ export default function QRCodeScreen() {
               size={250}
               backgroundColor="white"
               color="#2196F3"
-              logo={require('../../../assets/images/marb-logo.jpg')}
               logoSize={60}
               logoBackgroundColor="white"
               logoMargin={4}

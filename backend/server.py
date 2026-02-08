@@ -385,6 +385,15 @@ async def update_profile(profile_data: UpdateProfileRequest, authorization: Opti
         update_data["bio"] = profile_data.bio
     if profile_data.picture:
         update_data["picture"] = profile_data.picture
+    if profile_data.pronouns is not None:
+        update_data["pronouns"] = profile_data.pronouns
+    if profile_data.gender is not None:
+        update_data["gender"] = profile_data.gender
+    if profile_data.link is not None:
+        update_data["link"] = profile_data.link
+    
+    # Update last seen
+    update_data["last_seen"] = datetime.now(timezone.utc)
     
     if update_data:
         await db.users.update_one({"user_id": current_user.user_id}, {"$set": update_data})

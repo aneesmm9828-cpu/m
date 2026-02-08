@@ -25,6 +25,9 @@ export default function EditProfileScreen() {
   const [name, setName] = useState(user?.name || '');
   const [username, setUsername] = useState(user?.username || '');
   const [bio, setBio] = useState(user?.bio || '');
+  const [pronouns, setPronouns] = useState(user?.pronouns || '');
+  const [gender, setGender] = useState(user?.gender || '');
+  const [link, setLink] = useState(user?.link || '');
   const [profilePic, setProfilePic] = useState(user?.picture || '');
   const [loading, setLoading] = useState(false);
 

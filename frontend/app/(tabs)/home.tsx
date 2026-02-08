@@ -9,9 +9,11 @@ import {
   RefreshControl,
   FlatList,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/colors';
 import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
@@ -24,6 +26,7 @@ export default function HomeScreen() {
   const [stories, setStories] = useState([]);
   const [posts, setPosts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [myStories, setMyStories] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -31,12 +34,14 @@ export default function HomeScreen() {
 
   const loadData = async () => {
     try {
-      const [storiesRes, postsRes] = await Promise.all([
+      const [storiesRes, postsRes, myStoriesRes] = await Promise.all([
         api.get('/stories'),
         api.get('/posts/feed'),
+        api.get(`/stories/user/${user?.user_id}`),
       ]);
       setStories(storiesRes.data);
       setPosts(postsRes.data);
+      setMyStories(myStoriesRes.data);
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -48,6 +53,35 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
+  const handleAddStory = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Camera roll permission is required');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [9, 16],
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      try {
+        await api.post('/stories', {
+          image: result.assets[0].base64,
+        });
+        Alert.alert('Success', 'Story uploaded!');
+        await loadData();
+      } catch (error) {
+        console.error('Error uploading story:', error);
+        Alert.alert('Error', 'Failed to upload story');
+      }
+    }
+  };
+
   const handleLike = async (postId: string, isLiked: boolean) => {
     try {
       if (isLiked) {
@@ -55,7 +89,6 @@ export default function HomeScreen() {
       } else {
         await api.post(`/posts/${postId}/like`);
       }
-      // Update local state
       setPosts(posts.map(post => {
         if (post.post_id === postId) {
           const likes = isLiked
@@ -68,6 +101,41 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('Error liking post:', error);
     }
+  };
+
+  const renderMyStory = () => {
+    const hasStory = myStories.length > 0;
+    
+    return (
+      <TouchableOpacity style={styles.storyItem} activeOpacity={0.7} onPress={handleAddStory}>
+        {hasStory ? (
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.storyGradient}
+          >
+            <View style={styles.storyInner}>
+              <Image
+                source={{ uri: user?.picture || 'https://via.placeholder.com/100' }}
+                style={styles.storyImage}
+              />
+            </View>
+          </LinearGradient>
+        ) : (
+          <View style={styles.addStoryContainer}>
+            <Image
+              source={{ uri: user?.picture || 'https://via.placeholder.com/100' }}
+              style={styles.storyImage}
+            />
+            <View style={styles.addStoryButton}>
+              <Ionicons name="add" size={20} color={Colors.background} />
+            </View>
+          </View>
+        )}
+        <Text style={styles.storyName} numberOfLines={1}>
+          {hasStory ? 'Your story' : 'Add story'}
+        </Text>
+      </TouchableOpacity>
+    );
   };
 
   const renderStoryItem = ({ item }) => (
@@ -94,7 +162,6 @@ export default function HomeScreen() {
     
     return (
       <View style={styles.postCard}>
-        {/* Post Header */}
         <View style={styles.postHeader}>
           <Image
             source={{ uri: item.user?.picture || 'https://via.placeholder.com/100' }}
@@ -109,14 +176,12 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Post Image */}
         <Image
           source={{ uri: `data:image/jpeg;base64,${item.image}` }}
           style={styles.postImage}
           resizeMode="cover"
         />
 
-        {/* Post Actions */}
         <View style={styles.postActions}>
           <View style={styles.leftActions}>
             <TouchableOpacity onPress={() => handleLike(item.post_id, isLiked)}>
@@ -138,7 +203,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Post Info */}
         <View style={styles.postInfo}>
           <Text style={styles.likesCount}>{item.likes?.length || 0} likes</Text>
           {item.caption && (
@@ -171,9 +235,14 @@ export default function HomeScreen() {
           />
           <Text style={styles.headerTitle}>MARB</Text>
         </View>
-        <TouchableOpacity>
-          <Ionicons name="notifications-outline" size={28} color={Colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerIcon}>
+            <Ionicons name="heart-outline" size={28} color={Colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIcon}>
+            <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Stories */}
@@ -184,6 +253,7 @@ export default function HomeScreen() {
           data={stories}
           renderItem={renderStoryItem}
           keyExtractor={(item, index) => index.toString()}
+          ListHeaderComponent={renderMyStory}
           contentContainerStyle={styles.storiesList}
         />
       </View>
@@ -241,6 +311,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: Colors.text,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  headerIcon: {
+    padding: 4,
+  },
   storiesContainer: {
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -272,6 +350,28 @@ const styles = StyleSheet.create({
   storyImage: {
     width: '100%',
     height: '100%',
+  },
+  addStoryContainer: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    overflow: 'hidden',
+    marginBottom: 4,
+    borderWidth: 2,
+    borderColor: Colors.border,
+  },
+  addStoryButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.background,
   },
   storyName: {
     fontSize: 12,

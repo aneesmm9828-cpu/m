@@ -193,54 +193,54 @@ async def create_notification(user_id: str, type: str, from_user_id: str, text: 
 
 # =============== AUTHENTICATION ROUTES ===============
 
-@api_router.post("/auth/session")
-async def process_session(request: Request, response: Response):
-    """Process session_id from Emergent Auth and create user session
-    REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    """
+@api_router.post("/auth/signup")
+async def signup(request: Request, response: Response):
+    """Signup with username and password"""
     try:
         body = await request.json()
-        session_id = body.get("session_id")
+        name = body.get("name")
+        email = body.get("email")
+        username = body.get("username")
+        password = body.get("password")
         
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id required")
+        if not all([name, email, username, password]):
+            raise HTTPException(status_code=400, detail="All fields required")
         
-        # Get user data from Emergent Auth
-        async with httpx.AsyncClient() as client:
-            auth_response = await client.get(
-                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-                headers={"X-Session-ID": session_id}
-            )
-            
-            if auth_response.status_code != 200:
-                raise HTTPException(status_code=400, detail="Invalid session")
-            
-            auth_data = auth_response.json()
+        # Check if username or email exists
+        existing_user = await db.users.find_one({
+            "$or": [
+                {"username": username},
+                {"email": email}
+            ]
+        }, {"_id": 0})
         
-        # Check if user exists
-        user_doc = await db.users.find_one({"email": auth_data["email"]}, {"_id": 0})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username or email already exists")
         
-        if user_doc:
-            user = User(**user_doc)
-        else:
-            # Create new user
-            user_id = f"user_{uuid.uuid4().hex[:12]}"
-            username = auth_data["email"].split("@")[0] + str(uuid.uuid4().hex[:4])
-            user = User(
-                user_id=user_id,
-                email=auth_data["email"],
-                name=auth_data["name"],
-                picture=auth_data.get("picture"),
-                username=username,
-                bio="",
-                followers=[],
-                following=[],
-                created_at=datetime.now(timezone.utc)
-            )
-            await db.users.insert_one(user.dict())
+        # Create new user
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        user = User(
+            user_id=user_id,
+            email=email,
+            name=name,
+            username=username,
+            picture=None,
+            bio="",
+            followers=[],
+            following=[],
+            created_at=datetime.now(timezone.utc)
+        )
+        
+        # Store password hash (in production, use proper hashing like bcrypt)
+        import hashlib
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        user_dict = user.dict()
+        user_dict["password_hash"] = password_hash
+        await db.users.insert_one(user_dict)
         
         # Create session
-        session_token = auth_data["session_token"]
+        session_token = f"session_{uuid.uuid4().hex}"
         session = UserSession(
             user_id=user.user_id,
             session_token=session_token,
@@ -262,8 +262,66 @@ async def process_session(request: Request, response: Response):
         
         return {"user": user.dict(), "session_token": session_token}
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Session processing error: {str(e)}")
+        logger.error(f"Signup error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/auth/login")
+async def login(request: Request, response: Response):
+    """Login with username and password"""
+    try:
+        body = await request.json()
+        username = body.get("username")
+        password = body.get("password")
+        
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="Username and password required")
+        
+        # Find user
+        user_doc = await db.users.find_one({"username": username}, {"_id": 0})
+        if not user_doc:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Verify password
+        import hashlib
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        if user_doc.get("password_hash") != password_hash:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Remove password hash from response
+        user_doc.pop("password_hash", None)
+        user = User(**user_doc)
+        
+        # Create session
+        session_token = f"session_{uuid.uuid4().hex}"
+        session = UserSession(
+            user_id=user.user_id,
+            session_token=session_token,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            created_at=datetime.now(timezone.utc)
+        )
+        await db.user_sessions.insert_one(session.dict())
+        
+        # Set cookie
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=7*24*60*60,
+            path="/"
+        )
+        
+        return {"user": user.dict(), "session_token": session_token}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/auth/me")

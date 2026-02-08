@@ -34,6 +34,7 @@ export default function MessagesScreen() {
     <TouchableOpacity
       style={styles.conversationItem}
       activeOpacity={0.7}
+      onPress={() => router.push(`/messages/chat?userId=${item.user?.user_id}`)}
     >
       <Image
         source={{ uri: item.user?.picture || 'https://via.placeholder.com/100' }}

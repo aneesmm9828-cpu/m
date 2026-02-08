@@ -877,6 +877,17 @@ async def ai_chat(request: AIChatRequest, authorization: Optional[str] = Header(
         logger.error(f"AI chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI chat failed: {str(e)}")
 
+# =============== HEALTH AND ROOT ENDPOINTS ===============
+
+# Health check
+@api_router.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+@api_router.get("/")
+async def root():
+    return {"message": "MARB API is running", "version": "1.0"}
+
 # =============== INCLUDE ROUTER ===============
 
 app.include_router(api_router)
@@ -892,12 +903,3 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
-# Health check
-@api_router.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-@api_router.get("/")
-async def root():
-    return {"message": "MARB API is running", "version": "1.0"}

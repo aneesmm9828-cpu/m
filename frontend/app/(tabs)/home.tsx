@@ -231,12 +231,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  logoGradient: {
+  logoImage: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 24,

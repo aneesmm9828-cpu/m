@@ -13,9 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Colors } from '../../../constants/colors';
-import { api } from '../../../utils/api';
-import { useAuthStore } from '../../../store/authStore';
+import { Colors } from '../../constants/colors';
+import { api } from '../../utils/api';
+import { useAuthStore } from '../../store/authStore';
 
 export default function ChatScreen() {
   const router = useRouter();

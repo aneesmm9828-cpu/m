@@ -898,3 +898,7 @@ async def shutdown_db_client():
 @api_router.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@api_router.get("/")
+async def root():
+    return {"message": "MARB API is running", "version": "1.0"}

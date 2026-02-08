@@ -38,11 +38,12 @@ export default function CreateScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images', 'videos'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
       base64: true,
+      videoMaxDuration: 60,
     });
 
     if (!result.canceled && result.assets[0].base64) {

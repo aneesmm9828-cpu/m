@@ -15,9 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors } from '../../../constants/colors';
-import { api } from '../../../utils/api';
-import { useAuthStore } from '../../../store/authStore';
+import { Colors } from '../../constants/colors';
+import { api } from '../../utils/api';
+import { useAuthStore } from '../../store/authStore';
 
 export default function EditProfileScreen() {
   const router = useRouter();

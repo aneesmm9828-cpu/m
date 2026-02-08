@@ -370,8 +370,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 20,
   },
-  editButton: {
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
     marginBottom: 8,
+  },
+  editButton: {
+    flex: 1,
   },
   editButtonGradient: {
     paddingVertical: 12,
@@ -379,6 +384,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   editButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.background,
+  },
+  shareButton: {
+    flex: 1,
+  },
+  shareButtonGradient: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  shareButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.background,

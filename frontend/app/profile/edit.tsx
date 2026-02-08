@@ -145,6 +145,8 @@ export default function EditProfileScreen() {
                 style={styles.input}
                 placeholder="Add pronouns"
                 placeholderTextColor={Colors.textSecondary}
+                value={pronouns}
+                onChangeText={setPronouns}
               />
             </View>
 
@@ -162,13 +164,17 @@ export default function EditProfileScreen() {
             </View>
 
             {/* Additional Options */}
-            <TouchableOpacity style={styles.optionButton}>
-              <Text style={styles.optionText}>Add link</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.optionButton}>
-              <Text style={styles.optionText}>Add banners</Text>
-            </TouchableOpacity>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Link</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Add link"
+                placeholderTextColor={Colors.textSecondary}
+                value={link}
+                onChangeText={setLink}
+                autoCapitalize="none"
+              />
+            </View>
 
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Gender</Text>
@@ -176,6 +182,8 @@ export default function EditProfileScreen() {
                 style={styles.input}
                 placeholder="Prefer not to say"
                 placeholderTextColor={Colors.textSecondary}
+                value={gender}
+                onChangeText={setGender}
               />
             </View>
 

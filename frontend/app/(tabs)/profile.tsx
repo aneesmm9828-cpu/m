@@ -127,7 +127,10 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <TouchableOpacity onPress={() => router.push('/settings')}>
+            <Ionicons name="menu-outline" size={28} color={Colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{user?.username || 'Profile'}</Text>
           <TouchableOpacity onPress={confirmLogout}>
             <Ionicons name="log-out-outline" size={28} color={Colors.text} />
           </TouchableOpacity>

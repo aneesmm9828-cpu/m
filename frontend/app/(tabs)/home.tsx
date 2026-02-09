@@ -238,13 +238,13 @@ export default function HomeScreen() {
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/camera/capture')}>
-            <Ionicons name=\"camera-outline\" size={28} color={Colors.text} />
+            <Ionicons name="camera-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon}>
-            <Ionicons name=\"heart-outline\" size={28} color={Colors.text} />
+            <Ionicons name="heart-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon}>
-            <Ionicons name=\"chatbubble-outline\" size={26} color={Colors.text} />
+            <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
           </TouchableOpacity>
         </View>
       </View>

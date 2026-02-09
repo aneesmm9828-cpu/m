@@ -50,6 +50,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="reels"
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="play-circle" size={26} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="messages"
         options={{
           tabBarIcon: ({ color, size }) => (

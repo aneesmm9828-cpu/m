@@ -6,30 +6,59 @@ import {
   FlatList,
   TouchableOpacity,
   Image,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Colors } from '../../constants/colors';
+import { api } from '../../utils/api';
+import { useAuthStore } from '../../store/authStore';
 
 export default function MessagesScreen() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [conversations, setConversations] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [stories, setStories] = useState([]);
 
   useEffect(() => {
-    loadConversations();
+    loadData();
   }, []);
 
-  const loadConversations = async () => {
+  const loadData = async () => {
     try {
-      const response = await api.get('/messages/conversations');
-      setConversations(response.data);
+      const [conversationsRes, storiesRes] = await Promise.all([
+        api.get('/messages/conversations'),
+        api.get('/stories'),
+      ]);
+      setConversations(conversationsRes.data);
+      setStories(storiesRes.data);
     } catch (error) {
-      console.error('Error loading conversations:', error);
+      console.error('Error loading data:', error);
     }
   };
+
+  const renderStory = ({ item }) => (
+    <TouchableOpacity style={styles.storyItem}>
+      <LinearGradient
+        colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+        style={styles.storyGradient}
+      >
+        <View style={styles.storyInner}>
+          <Image
+            source={{ uri: item.user?.picture || 'https://via.placeholder.com/100' }}
+            style={styles.storyImage}
+          />
+        </View>
+      </LinearGradient>
+      <Text style={styles.storyName} numberOfLines={1}>
+        {item.user?.username || item.user?.name}
+      </Text>
+    </TouchableOpacity>
+  );
 
   const renderConversation = ({ item }) => (
     <TouchableOpacity
@@ -46,13 +75,18 @@ export default function MessagesScreen() {
           <Text style={styles.userName}>{item.user?.name}</Text>
           <Text style={styles.messageTime}>2h ago</Text>
         </View>
-        <Text style={styles.lastMessage} numberOfLines={1}>
-          {item.last_message?.text || 'Sent an image'}
-        </Text>
+        <View style={styles.lastMessageContainer}>
+          <Text style={styles.lastMessage} numberOfLines={1}>
+            {item.last_message?.text || 'Sent an image'}
+          </Text>
+          {item.last_message?.image && (
+            <Ionicons name="camera" size={16} color={Colors.textSecondary} style={styles.messageIcon} />
+          )}
+        </View>
       </View>
       {item.unread_count > 0 && (
         <View style={styles.unreadBadge}>
-          <Text style={styles.unreadCount}>{item.unread_count}</Text>
+          <View style={styles.unreadDot} />
         </View>
       )}
     </TouchableOpacity>
@@ -62,15 +96,32 @@ export default function MessagesScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity onPress={() => router.push('/messages/ai-assistant')}>
-          <LinearGradient
-            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-            style={styles.aiButton}
-          >
-            <Ionicons name="sparkles" size={24} color={Colors.background} />
-          </LinearGradient>
+        <View style={styles.logoContainer}>
+          <Image
+            source={require('../../assets/images/marb-logo.jpg')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.headerTitle}>MARB</Text>
+        </View>
+        <TouchableOpacity style={styles.searchButton}>
+          <Ionicons name="search" size={28} color={Colors.text} />
         </TouchableOpacity>
+      </View>
+
+      {/* Stories Section */}
+      <View style={styles.storiesSection}>
+        <Text style={styles.sectionTitle}>Stories</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storiesScroll}>
+          <FlatList
+            horizontal
+            data={stories}
+            renderItem={renderStory}
+            keyExtractor={(item, index) => index.toString()}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.storiesList}
+          />
+        </ScrollView>
       </View>
 
       {/* AI Assistant Card */}
@@ -79,26 +130,34 @@ export default function MessagesScreen() {
         onPress={() => router.push('/messages/ai-assistant')}
         activeOpacity={0.7}
       >
-        <LinearGradient
-          colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-          style={styles.aiCardGradient}
-        >
-          <View style={styles.aiCardContent}>
-            <View style={styles.aiIconContainer}>
-              <Ionicons name="sparkles" size={32} color={Colors.background} />
-            </View>
-            <View style={styles.aiCardText}>
-              <Text style={styles.aiCardTitle}>AI Assistant</Text>
-              <Text style={styles.aiCardSubtitle}>
-                Generate photos, videos, reels & get editing tips
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color={Colors.background} />
-          </View>
-        </LinearGradient>
+        <View style={styles.aiAvatar}>
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.aiAvatarGradient}
+          >
+            <Ionicons name="sparkles" size={24} color={Colors.background} />
+          </LinearGradient>
+        </View>
+        <View style={styles.aiCardText}>
+          <Text style={styles.aiCardTitle}>AI</Text>
+          <Text style={styles.aiCardSubtitle}>Ask Meta AI anything</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
       </TouchableOpacity>
 
-      {/* Conversations List */}
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color={Colors.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search"
+          placeholderTextColor={Colors.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
+      {/* Messages List */}
       <FlatList
         data={conversations}
         renderItem={renderConversation}
@@ -129,37 +188,88 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  logoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  logo: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: Colors.text,
   },
-  aiButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+  searchButton: {
+    padding: 4,
   },
-  aiCard: {
-    marginHorizontal: 16,
-    marginVertical: 12,
-    borderRadius: 16,
+  storiesSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 8,
+    borderBottomColor: Colors.border,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  storiesScroll: {
+    paddingLeft: 16,
+  },
+  storiesList: {
+    paddingRight: 16,
+  },
+  storyItem: {
+    alignItems: 'center',
+    marginRight: 12,
+    width: 70,
+  },
+  storyGradient: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    padding: 3,
+    marginBottom: 4,
+  },
+  storyInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 32,
+    borderWidth: 3,
+    borderColor: Colors.background,
     overflow: 'hidden',
   },
-  aiCardGradient: {
-    padding: 16,
+  storyImage: {
+    width: '100%',
+    height: '100%',
   },
-  aiCardContent: {
+  storyName: {
+    fontSize: 12,
+    color: Colors.text,
+  },
+  aiCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
-  aiIconContainer: {
+  aiAvatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  aiAvatarGradient: {
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -167,20 +277,38 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   aiCardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.background,
-    marginBottom: 4,
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
   },
   aiCardSubtitle: {
-    fontSize: 13,
-    color: Colors.background,
-    opacity: 0.9,
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBackground,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    height: 40,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: Colors.text,
   },
   conversationItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
@@ -208,23 +336,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
   },
+  lastMessageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   lastMessage: {
     fontSize: 14,
     color: Colors.textSecondary,
+    flex: 1,
+  },
+  messageIcon: {
+    marginLeft: 4,
   },
   unreadBadge: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
+    marginLeft: 8,
   },
-  unreadCount: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.background,
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.primary,
   },
   emptyContainer: {
     alignItems: 'center',

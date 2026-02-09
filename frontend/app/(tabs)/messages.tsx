@@ -62,10 +62,40 @@ export default function MessagesScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity>
-          <Ionicons name="create-outline" size={28} color={Colors.text} />
+        <TouchableOpacity onPress={() => router.push('/messages/ai-assistant')}>
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.aiButton}
+          >
+            <Ionicons name="sparkles" size={24} color={Colors.background} />
+          </LinearGradient>
         </TouchableOpacity>
       </View>
+
+      {/* AI Assistant Card */}
+      <TouchableOpacity 
+        style={styles.aiCard}
+        onPress={() => router.push('/messages/ai-assistant')}
+        activeOpacity={0.7}
+      >
+        <LinearGradient
+          colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+          style={styles.aiCardGradient}
+        >
+          <View style={styles.aiCardContent}>
+            <View style={styles.aiIconContainer}>
+              <Ionicons name="sparkles" size={32} color={Colors.background} />
+            </View>
+            <View style={styles.aiCardText}>
+              <Text style={styles.aiCardTitle}>AI Assistant</Text>
+              <Text style={styles.aiCardSubtitle}>
+                Generate photos, videos, reels & get editing tips
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={Colors.background} />
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
 
       {/* Conversations List */}
       <FlatList

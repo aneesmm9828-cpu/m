@@ -11,9 +11,9 @@ import {
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Colors } from '../../../constants/colors';
+import { Colors } from '../../constants/colors';
 import { LinearGradient } from 'expo-linear-gradient';
-import { api } from '../../../utils/api';
+import { api } from '../../utils/api';
 import * as MediaLibrary from 'expo-media-library';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');

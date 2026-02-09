@@ -112,16 +112,14 @@ export default function MessagesScreen() {
       {/* Stories Section */}
       <View style={styles.storiesSection}>
         <Text style={styles.sectionTitle}>Stories</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.storiesScroll}>
-          <FlatList
-            horizontal
-            data={stories}
-            renderItem={renderStory}
-            keyExtractor={(item, index) => index.toString()}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.storiesList}
-          />
-        </ScrollView>
+        <FlatList
+          horizontal
+          data={stories}
+          renderItem={renderStory}
+          keyExtractor={(item, index) => index.toString()}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.storiesList}
+        />
       </View>
 
       {/* AI Assistant Card */}

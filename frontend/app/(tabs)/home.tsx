@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { user } = useAuthStore();
   const [stories, setStories] = useState([]);
   const [posts, setPosts] = useState([]);

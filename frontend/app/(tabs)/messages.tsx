@@ -134,6 +134,49 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: Colors.text,
   },
+  aiButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  aiCard: {
+    marginHorizontal: 16,
+    marginVertical: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  aiCardGradient: {
+    padding: 16,
+  },
+  aiCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  aiIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  aiCardText: {
+    flex: 1,
+  },
+  aiCardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.background,
+    marginBottom: 4,
+  },
+  aiCardSubtitle: {
+    fontSize: 13,
+    color: Colors.background,
+    opacity: 0.9,
+  },
   conversationItem: {
     flexDirection: 'row',
     alignItems: 'center',

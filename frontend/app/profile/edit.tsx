@@ -39,15 +39,16 @@ export default function EditProfileScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.7,
       base64: true,
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      setProfilePic(result.assets[0].base64);
+      const base64Image = result.assets[0].base64;
+      setProfilePic(`data:image/jpeg;base64,${base64Image}`);
     }
   };
 

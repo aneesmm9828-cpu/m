@@ -142,7 +142,11 @@ export default function HomeScreen() {
   };
 
   const renderStoryItem = ({ item }) => (
-    <TouchableOpacity style={styles.storyItem} activeOpacity={0.7}>
+    <TouchableOpacity 
+      style={styles.storyItem} 
+      activeOpacity={0.7}
+      onPress={() => router.push(`/story/view?userId=${item.user?.user_id}`)}
+    >
       <LinearGradient
         colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
         style={styles.storyGradient}

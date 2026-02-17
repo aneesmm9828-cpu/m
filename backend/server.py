@@ -957,6 +957,78 @@ async def unlike_reel(reel_id: str, authorization: Optional[str] = Header(None),
     
     return {"message": "Reel unliked"}
 
+@api_router.post("/reels/{reel_id}/comment")
+async def comment_on_reel(reel_id: str, comment_data: dict, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Add a comment to a reel"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    comment = {
+        "comment_id": f"cmt_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "user_name": current_user.name,
+        "username": current_user.username,
+        "user_picture": current_user.picture[:50] + "..." if current_user.picture else None,
+        "text": comment_data.get("text", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "likes": []
+    }
+    
+    await db.reels.update_one(
+        {"reel_id": reel_id},
+        {"$push": {"comments": comment}}
+    )
+    
+    # Get reel owner for notification
+    reel = await db.reels.find_one({"reel_id": reel_id}, {"_id": 0, "user_id": 1})
+    if reel and reel["user_id"] != current_user.user_id:
+        await create_notification(
+            user_id=reel["user_id"],
+            type="reel_comment",
+            from_user_id=current_user.user_id,
+            text=f"{current_user.name} commented on your reel"
+        )
+    
+    return comment
+
+@api_router.post("/reels/{reel_id}/save")
+async def save_reel(reel_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Save a reel to collection"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$addToSet": {"saved_reels": reel_id}}
+    )
+    
+    return {"message": "Reel saved"}
+
+@api_router.post("/reels/{reel_id}/unsave")
+async def unsave_reel(reel_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Remove reel from saved collection"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"saved_reels": reel_id}}
+    )
+    
+    return {"message": "Reel unsaved"}
+
+@api_router.delete("/reels/{reel_id}")
+async def delete_reel(reel_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Delete a reel"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    reel = await db.reels.find_one({"reel_id": reel_id}, {"_id": 0})
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    
+    if reel["user_id"] != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this reel")
+    
+    await db.reels.delete_one({"reel_id": reel_id})
+    return {"message": "Reel deleted"}
+
 # =============== MESSAGE ROUTES ===============
 
 @api_router.post("/messages")

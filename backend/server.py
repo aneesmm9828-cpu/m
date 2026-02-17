@@ -81,13 +81,15 @@ class PostCreate(BaseModel):
 class Story(BaseModel):
     story_id: str
     user_id: str
-    image: str  # base64
+    image: str  # base64 (image or video)
+    media_type: str = "image"  # "image" or "video"
     views: List[str] = []  # List of user_ids who viewed
     created_at: datetime
     expires_at: datetime
 
 class StoryCreate(BaseModel):
     image: str
+    media_type: str = "image"  # "image" or "video"
 
 class Reel(BaseModel):
     reel_id: str

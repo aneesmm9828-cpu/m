@@ -1031,6 +1031,262 @@ async def health_check():
 async def root():
     return {"message": "MARB API is running", "version": "1.0"}
 
+# =============== DATABASE SEED ENDPOINT ===============
+
+import random
+import io
+from PIL import Image
+
+def generate_gradient_image(width=400, height=400, colors=None):
+    """Generate a gradient image as base64"""
+    if colors is None:
+        # Random gradient colors
+        color1 = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        color2 = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+    else:
+        color1, color2 = colors
+    
+    img = Image.new('RGB', (width, height))
+    for y in range(height):
+        r = int(color1[0] + (color2[0] - color1[0]) * y / height)
+        g = int(color1[1] + (color2[1] - color1[1]) * y / height)
+        b = int(color1[2] + (color2[2] - color1[2]) * y / height)
+        for x in range(width):
+            img.putpixel((x, y), (r, g, b))
+    
+    buffer = io.BytesIO()
+    img.save(buffer, format='JPEG', quality=60)
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+def generate_profile_pic():
+    """Generate a simple profile picture"""
+    colors = [
+        ((255, 100, 100), (200, 50, 50)),    # Red
+        ((100, 255, 100), (50, 200, 50)),    # Green
+        ((100, 100, 255), (50, 50, 200)),    # Blue
+        ((255, 200, 100), (200, 150, 50)),   # Orange
+        ((200, 100, 255), (150, 50, 200)),   # Purple
+        ((100, 255, 255), (50, 200, 200)),   # Cyan
+        ((255, 100, 200), (200, 50, 150)),   # Pink
+        ((255, 255, 100), (200, 200, 50)),   # Yellow
+    ]
+    return generate_gradient_image(100, 100, random.choice(colors))
+
+FIRST_NAMES = [
+    "Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Reyansh", "Ayaan", "Krishna", "Ishaan", "Sai",
+    "Ananya", "Aadhya", "Saanvi", "Myra", "Diya", "Pari", "Aanya", "Kiara", "Riya", "Priya",
+    "Rohan", "Karan", "Amit", "Rahul", "Nikhil", "Vikram", "Raj", "Dev", "Aryan", "Kabir",
+    "Neha", "Sneha", "Pooja", "Kavya", "Sanya", "Tanvi", "Isha", "Nikita", "Shruti", "Meera",
+    "Mohammed", "Ali", "Omar", "Hassan", "Ahmed", "Zara", "Fatima", "Ayesha", "Sara", "Hina",
+    "John", "Mike", "David", "Chris", "Alex", "Emma", "Sophia", "Olivia", "Ava", "Mia"
+]
+
+LAST_NAMES = [
+    "Sharma", "Verma", "Gupta", "Singh", "Kumar", "Patel", "Shah", "Joshi", "Reddy", "Nair",
+    "Khan", "Ali", "Ahmed", "Sheikh", "Malik", "Ansari", "Siddiqui", "Qureshi", "Mirza", "Hashmi",
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Davis", "Miller", "Wilson", "Moore", "Taylor"
+]
+
+CAPTIONS = [
+    "Living my best life! ✨", "Good vibes only 🌟", "Making memories 📸", "Blessed and grateful 🙏",
+    "Adventure awaits! 🌍", "Chasing dreams ⭐", "Stay positive 💫", "Love this moment ❤️",
+    "Weekend mood 🎉", "Perfect day! ☀️", "Feeling happy 😊", "Life is beautiful 🌸",
+    "No filter needed 📷", "Just me being me 💁", "Sunset vibes 🌅", "Coffee time ☕",
+    "Workout done 💪", "Travel diaries ✈️", "Food lover 🍕", "Nature lover 🌿",
+    "Party time! 🎊", "Chill mode on 😎", "New beginning 🌱", "Grateful heart 💖",
+    "Dream big! 🚀", "Keep smiling 😄", "Stay humble 🙌", "Enjoy little things 🎀",
+    "Beach please 🏖️", "Mountain calling 🏔️", "City lights 🌃", "Rainy day ☔",
+    "Music is life 🎵", "Art lover 🎨", "Book worm 📚", "Fitness freak 🏃",
+    "Fashion forward 👗", "Pet lover 🐕", "Friends forever 👫", "Family first 👨‍👩‍👧‍👦"
+]
+
+BIOS = [
+    "Living life one day at a time 🌟",
+    "Dream. Believe. Achieve. ✨",
+    "Adventure seeker | Travel lover 🌍",
+    "Music | Art | Photography 📸",
+    "Just a simple person with big dreams 💭",
+    "Spreading positivity everywhere 🌈",
+    "Coffee addict ☕ | Book lover 📚",
+    "Fitness enthusiast 💪 | Health first",
+    "Creating memories one click at a time 📷",
+    "Love laugh live 💖",
+    "Writer | Dreamer | Creator ✍️",
+    "Tech geek 💻 | Innovation lover",
+    "Food explorer 🍕 | Trying new cuisines",
+    "Nature lover 🌿 | Environment first",
+    "Student of life 📖 | Always learning"
+]
+
+@api_router.post("/seed-database")
+async def seed_database():
+    """Seed database with demo data: 60 users, 400 posts, 500 reels"""
+    try:
+        # Clear existing data
+        await db.users.delete_many({})
+        await db.posts.delete_many({})
+        await db.reels.delete_many({})
+        await db.stories.delete_many({})
+        await db.user_sessions.delete_many({})
+        
+        users = []
+        user_ids = []
+        
+        # Create 60 demo users
+        logger.info("Creating 60 demo users...")
+        for i in range(60):
+            first_name = random.choice(FIRST_NAMES)
+            last_name = random.choice(LAST_NAMES)
+            name = f"{first_name} {last_name}"
+            username = f"{first_name.lower()}{random.randint(100, 999)}"
+            email = f"{username}@demo.com"
+            
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            user_ids.append(user_id)
+            
+            # Generate followers/following (random connections)
+            num_following = random.randint(5, 30)
+            following = random.sample(user_ids[:-1], min(num_following, len(user_ids) - 1)) if len(user_ids) > 1 else []
+            
+            user = {
+                "user_id": user_id,
+                "email": email,
+                "name": name,
+                "username": username,
+                "picture": generate_profile_pic(),
+                "bio": random.choice(BIOS),
+                "pronouns": random.choice(["he/him", "she/her", "they/them", ""]),
+                "gender": random.choice(["Male", "Female", "Other", ""]),
+                "link": f"https://example.com/{username}" if random.random() > 0.5 else "",
+                "followers": [],
+                "following": following,
+                "posts_count": 0,
+                "followers_count": 0,
+                "following_count": len(following),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=random.randint(1, 365)),
+                "last_seen": datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 72)),
+                "password_hash": "demo_password_hash"
+            }
+            users.append(user)
+        
+        # Insert users
+        await db.users.insert_many(users)
+        logger.info(f"Created {len(users)} users")
+        
+        # Update followers based on following
+        for user in users:
+            for followed_id in user["following"]:
+                await db.users.update_one(
+                    {"user_id": followed_id},
+                    {"$addToSet": {"followers": user["user_id"]}}
+                )
+        
+        # Create 400 posts
+        logger.info("Creating 400 posts...")
+        posts = []
+        for i in range(400):
+            user_id = random.choice(user_ids)
+            post_user = next(u for u in users if u["user_id"] == user_id)
+            
+            # Random likes from other users
+            num_likes = random.randint(0, min(50, len(user_ids)))
+            likes = random.sample(user_ids, num_likes)
+            
+            # Random comments
+            num_comments = random.randint(0, 10)
+            comments = []
+            for _ in range(num_comments):
+                commenter_id = random.choice(user_ids)
+                commenter = next(u for u in users if u["user_id"] == commenter_id)
+                comments.append({
+                    "comment_id": f"cmt_{uuid.uuid4().hex[:12]}",
+                    "user_id": commenter_id,
+                    "user_name": commenter["name"],
+                    "user_picture": commenter["picture"][:50] + "..." if commenter["picture"] else None,
+                    "text": random.choice(["Nice! 👍", "Beautiful ❤️", "Amazing 🔥", "Love it! 😍", "Great shot! 📸", "Awesome! 🙌", "So cool! 😎", "Wow! 🤩"]),
+                    "created_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 100))).isoformat()
+                })
+            
+            post = {
+                "post_id": f"post_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "image": generate_gradient_image(400, 400),
+                "caption": random.choice(CAPTIONS),
+                "likes": likes,
+                "comments": comments,
+                "created_at": datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 500))
+            }
+            posts.append(post)
+            
+            if (i + 1) % 50 == 0:
+                logger.info(f"Created {i + 1} posts...")
+        
+        await db.posts.insert_many(posts)
+        logger.info(f"Created {len(posts)} posts")
+        
+        # Create 500 reels
+        logger.info("Creating 500 reels...")
+        reels = []
+        for i in range(500):
+            user_id = random.choice(user_ids)
+            
+            # Random likes
+            num_likes = random.randint(0, min(100, len(user_ids)))
+            likes = random.sample(user_ids, num_likes)
+            
+            # Random comments
+            num_comments = random.randint(0, 15)
+            comments = []
+            for _ in range(num_comments):
+                commenter_id = random.choice(user_ids)
+                commenter = next(u for u in users if u["user_id"] == commenter_id)
+                comments.append({
+                    "comment_id": f"cmt_{uuid.uuid4().hex[:12]}",
+                    "user_id": commenter_id,
+                    "user_name": commenter["name"],
+                    "text": random.choice(["🔥🔥🔥", "So good!", "Amazing reel!", "Love this! ❤️", "Viral! 🚀", "Keep it up! 💪", "Trending! 📈", "Best! 🏆"]),
+                    "created_at": (datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 100))).isoformat()
+                })
+            
+            reel = {
+                "reel_id": f"reel_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "video": generate_gradient_image(270, 480),  # Vertical video placeholder
+                "caption": random.choice(CAPTIONS) + " #reel #viral #trending",
+                "likes": likes,
+                "comments": comments,
+                "created_at": datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 300))
+            }
+            reels.append(reel)
+            
+            if (i + 1) % 100 == 0:
+                logger.info(f"Created {i + 1} reels...")
+        
+        await db.reels.insert_many(reels)
+        logger.info(f"Created {len(reels)} reels")
+        
+        # Update post counts for users
+        for user_id in user_ids:
+            posts_count = len([p for p in posts if p["user_id"] == user_id])
+            await db.users.update_one(
+                {"user_id": user_id},
+                {"$set": {"posts_count": posts_count}}
+            )
+        
+        return {
+            "success": True,
+            "message": "Database seeded successfully!",
+            "data": {
+                "users": 60,
+                "posts": 400,
+                "reels": 500
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Seed error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Seed failed: {str(e)}")
+
 # =============== INCLUDE ROUTER ===============
 
 app.include_router(api_router)

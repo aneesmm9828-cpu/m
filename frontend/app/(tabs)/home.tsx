@@ -24,19 +24,19 @@ const STORY_SIZE = 75;
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, setUser } = useAuthStore();
+  const { user } = useAuthStore();
   const [stories, setStories] = useState([]);
   const [posts, setPosts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [myStories, setMyStories] = useState([]);
-  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [followingIds, setFollowingIds] = useState([]);
 
   useEffect(() => {
     loadData();
   }, []);
 
   useEffect(() => {
-    if (user?.following) {
+    if (user && user.following) {
       setFollowingIds(user.following);
     }
   }, [user]);
@@ -46,14 +46,13 @@ export default function HomeScreen() {
       const [storiesRes, postsRes, myStoriesRes] = await Promise.all([
         api.get('/stories'),
         api.get('/posts/feed'),
-        api.get(`/stories/user/${user?.user_id}`),
+        api.get('/stories/user/' + (user ? user.user_id : '')),
       ]);
       setStories(storiesRes.data || []);
       setPosts(postsRes.data || []);
       setMyStories(myStoriesRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
-      // Load explore posts as fallback if feed is empty
       try {
         const exploreRes = await api.get('/posts/explore?limit=50');
         setPosts(exploreRes.data || []);
@@ -109,23 +108,23 @@ export default function HomeScreen() {
   };
 
   const handleViewMyStory = () => {
-    if (myStories.length > 0) {
-      router.push(`/story/view?userId=${user?.user_id}`);
+    if (myStories.length > 0 && user) {
+      router.push('/story/view?userId=' + user.user_id);
     } else {
       handleAddStory();
     }
   };
 
-  const handleFollow = async (userId: string) => {
+  const handleFollow = async (userId) => {
     try {
       const isFollowing = followingIds.includes(userId);
       
       if (isFollowing) {
-        await api.post(`/users/${userId}/unfollow`);
-        setFollowingIds(prev => prev.filter(id => id !== userId));
+        await api.post('/users/' + userId + '/unfollow');
+        setFollowingIds(followingIds.filter(function(id) { return id !== userId; }));
       } else {
-        await api.post(`/users/${userId}/follow`);
-        setFollowingIds(prev => [...prev, userId]);
+        await api.post('/users/' + userId + '/follow');
+        setFollowingIds([...followingIds, userId]);
       }
     } catch (error) {
       console.error('Error following/unfollowing:', error);
@@ -133,19 +132,19 @@ export default function HomeScreen() {
     }
   };
 
-  const handleLike = async (postId: string, isLiked: boolean) => {
+  const handleLike = async (postId, isLiked) => {
     try {
       if (isLiked) {
-        await api.post(`/posts/${postId}/unlike`);
+        await api.post('/posts/' + postId + '/unlike');
       } else {
-        await api.post(`/posts/${postId}/like`);
+        await api.post('/posts/' + postId + '/like');
       }
-      setPosts(posts.map(post => {
+      setPosts(posts.map(function(post) {
         if (post.post_id === postId) {
-          const likes = isLiked
-            ? post.likes.filter(id => id !== user?.user_id)
-            : [...post.likes, user?.user_id];
-          return { ...post, likes };
+          var likes = isLiked
+            ? post.likes.filter(function(id) { return id !== (user ? user.user_id : ''); })
+            : [...post.likes, user ? user.user_id : ''];
+          return { ...post, likes: likes };
         }
         return post;
       }));
@@ -155,18 +154,17 @@ export default function HomeScreen() {
   };
 
   const getUserPicture = () => {
-    if (user?.picture) {
+    if (user && user.picture) {
       if (user.picture.startsWith('http')) {
         return user.picture;
       }
-      return `data:image/jpeg;base64,${user.picture}`;
+      return 'data:image/jpeg;base64,' + user.picture;
     }
     return 'https://via.placeholder.com/100';
   };
 
   const renderHeader = () => (
-    <>
-      {/* Header */}
+    <View>
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <Image
@@ -186,19 +184,18 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Stories Section */}
       <View style={styles.storiesContainer}>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
           data={stories}
           renderItem={renderStoryItem}
-          keyExtractor={(item, index) => `story-${index}`}
+          keyExtractor={(item, index) => 'story-' + index}
           ListHeaderComponent={renderMyStory}
           contentContainerStyle={styles.storiesList}
         />
       </View>
-    </>
+    </View>
   );
 
   const renderMyStory = () => {
@@ -252,11 +249,11 @@ export default function HomeScreen() {
 
   const renderStoryItem = ({ item }) => {
     const getStoryUserPic = () => {
-      if (item.user?.picture) {
+      if (item.user && item.user.picture) {
         if (item.user.picture.startsWith('http')) {
           return item.user.picture;
         }
-        return `data:image/jpeg;base64,${item.user.picture}`;
+        return 'data:image/jpeg;base64,' + item.user.picture;
       }
       return 'https://via.placeholder.com/100';
     };
@@ -265,7 +262,7 @@ export default function HomeScreen() {
       <TouchableOpacity 
         style={styles.storyItem} 
         activeOpacity={0.7}
-        onPress={() => router.push(`/story/view?userId=${item.user?.user_id}`)}
+        onPress={() => router.push('/story/view?userId=' + (item.user ? item.user.user_id : ''))}
       >
         <View style={styles.storyCircleContainer}>
           <LinearGradient
@@ -283,23 +280,23 @@ export default function HomeScreen() {
           </LinearGradient>
         </View>
         <Text style={styles.storyUsername} numberOfLines={1}>
-          {item.user?.username || item.user?.name}
+          {item.user ? (item.user.username || item.user.name) : 'User'}
         </Text>
       </TouchableOpacity>
     );
   };
 
   const renderPost = ({ item }) => {
-    const isLiked = item.likes?.includes(user?.user_id);
-    const isFollowing = followingIds.includes(item.user?.user_id);
-    const isOwnPost = item.user?.user_id === user?.user_id;
+    const isLiked = item.likes && user ? item.likes.includes(user.user_id) : false;
+    const isFollowing = item.user ? followingIds.includes(item.user.user_id) : false;
+    const isOwnPost = item.user && user ? item.user.user_id === user.user_id : false;
     
     const getPostUserPic = () => {
-      if (item.user?.picture) {
+      if (item.user && item.user.picture) {
         if (item.user.picture.startsWith('http')) {
           return item.user.picture;
         }
-        return `data:image/jpeg;base64,${item.user.picture}`;
+        return 'data:image/jpeg;base64,' + item.user.picture;
       }
       return 'https://via.placeholder.com/100';
     };
@@ -312,21 +309,15 @@ export default function HomeScreen() {
             style={styles.postUserImage}
           />
           <View style={styles.postUserInfo}>
-            <Text style={styles.postUserName}>{item.user?.username || item.user?.name}</Text>
-            <Text style={styles.postUserId}>@{item.user?.username || 'user'}</Text>
+            <Text style={styles.postUserName}>{item.user ? (item.user.username || item.user.name) : 'User'}</Text>
+            <Text style={styles.postUserId}>@{item.user ? (item.user.username || 'user') : 'user'}</Text>
           </View>
           {!isOwnPost && (
             <TouchableOpacity 
-              style={[
-                styles.followButton,
-                isFollowing && styles.followingButton
-              ]}
-              onPress={() => handleFollow(item.user?.user_id)}
+              style={[styles.followButton, isFollowing && styles.followingButton]}
+              onPress={() => item.user && handleFollow(item.user.user_id)}
             >
-              <Text style={[
-                styles.followButtonText,
-                isFollowing && styles.followingButtonText
-              ]}>
+              <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
@@ -337,7 +328,7 @@ export default function HomeScreen() {
         </View>
 
         <Image
-          source={{ uri: `data:image/jpeg;base64,${item.image}` }}
+          source={{ uri: 'data:image/jpeg;base64,' + item.image }}
           style={styles.postImage}
           resizeMode="cover"
         />
@@ -364,14 +355,14 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.postInfo}>
-          <Text style={styles.likesCount}>{item.likes?.length || 0} likes</Text>
+          <Text style={styles.likesCount}>{item.likes ? item.likes.length : 0} likes</Text>
           {item.caption && (
             <Text style={styles.caption}>
-              <Text style={styles.captionUsername}>{item.user?.username || item.user?.name} </Text>
+              <Text style={styles.captionUsername}>{item.user ? (item.user.username || item.user.name) : 'User'} </Text>
               {item.caption}
             </Text>
           )}
-          {item.comments?.length > 0 && (
+          {item.comments && item.comments.length > 0 && (
             <TouchableOpacity>
               <Text style={styles.viewComments}>
                 View all {item.comments.length} comments

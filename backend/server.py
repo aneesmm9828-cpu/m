@@ -82,6 +82,7 @@ class Story(BaseModel):
     story_id: str
     user_id: str
     image: str  # base64
+    views: List[str] = []  # List of user_ids who viewed
     created_at: datetime
     expires_at: datetime
 

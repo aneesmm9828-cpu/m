@@ -737,6 +737,54 @@ async def get_stories(authorization: Optional[str] = Header(None), session_token
     
     return list(stories_by_user.values())
 
+# =============== HIGHLIGHTS ENDPOINTS ===============
+
+class HighlightCreate(BaseModel):
+    name: str
+    cover_image: str = ""
+    story_ids: List[str] = []
+
+@api_router.post("/highlights")
+async def create_highlight(highlight_data: HighlightCreate, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a new story highlight"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    highlight = {
+        "highlight_id": f"highlight_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "name": highlight_data.name,
+        "cover_image": highlight_data.cover_image,
+        "story_ids": highlight_data.story_ids,
+        "created_at": datetime.now(timezone.utc)
+    }
+    
+    await db.highlights.insert_one(highlight)
+    return highlight
+
+@api_router.get("/highlights/user/{user_id}")
+async def get_user_highlights(user_id: str):
+    """Get highlights for a user"""
+    highlights = await db.highlights.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return highlights
+
+@api_router.delete("/highlights/{highlight_id}")
+async def delete_highlight(highlight_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Delete a highlight"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    result = await db.highlights.delete_one({
+        "highlight_id": highlight_id,
+        "user_id": current_user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    
+    return {"message": "Highlight deleted"}
+
 @api_router.get("/stories/user/{user_id}")
 async def get_user_stories(user_id: str):
     """Get stories from a specific user"""

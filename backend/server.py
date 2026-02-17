@@ -846,7 +846,62 @@ async def get_story_viewers(story_id: str, authorization: Optional[str] = Header
         "viewers": viewers
     }
 
+@api_router.post("/stories/{story_id}/like")
+async def like_story(story_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Like a story"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    story = await db.stories.find_one({"story_id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    
+    await db.stories.update_one(
+        {"story_id": story_id},
+        {"$addToSet": {"likes": current_user.user_id}}
+    )
+    
+    # Create notification
+    if story["user_id"] != current_user.user_id:
+        await create_notification(
+            user_id=story["user_id"],
+            type="story_like",
+            from_user_id=current_user.user_id,
+            text=f"{current_user.name} liked your story"
+        )
+    
+    return {"message": "Story liked"}
+
+@api_router.delete("/stories/{story_id}")
+async def delete_story(story_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Delete a story"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    story = await db.stories.find_one({"story_id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    
+    if story["user_id"] != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this story")
+    
+    await db.stories.delete_one({"story_id": story_id})
+    return {"message": "Story deleted"}
+
 # =============== REEL ROUTES ===============
+
+@api_router.get("/reels/user/{user_id}")
+async def get_user_reels(user_id: str, skip: int = 0, limit: int = 50):
+    """Get reels from a specific user"""
+    reels = await db.reels.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Add user info to each reel
+    for reel in reels:
+        user = await db.users.find_one({"user_id": reel["user_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        reel["user"] = user
+    
+    return reels
 
 @api_router.post("/reels")
 async def create_reel(reel_data: ReelCreate, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):

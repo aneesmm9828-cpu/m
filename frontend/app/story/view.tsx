@@ -29,7 +29,7 @@ interface Viewer {
 export default function StoryViewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser } = useAuthStore();
   const [story, setStory] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [viewCount, setViewCount] = useState(0);

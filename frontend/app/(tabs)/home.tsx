@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Image,
   TouchableOpacity,
   RefreshControl,
@@ -20,20 +19,27 @@ import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const { width } = Dimensions.get('window');
-const STORY_SIZE = 80;
+const { width, height } = Dimensions.get('window');
+const STORY_SIZE = 75;
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const [stories, setStories] = useState([]);
   const [posts, setPosts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [myStories, setMyStories] = useState([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (user?.following) {
+      setFollowingIds(user.following);
+    }
+  }, [user]);
 
   const loadData = async () => {
     try {
@@ -42,11 +48,18 @@ export default function HomeScreen() {
         api.get('/posts/feed'),
         api.get(`/stories/user/${user?.user_id}`),
       ]);
-      setStories(storiesRes.data);
-      setPosts(postsRes.data);
-      setMyStories(myStoriesRes.data);
+      setStories(storiesRes.data || []);
+      setPosts(postsRes.data || []);
+      setMyStories(myStoriesRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
+      // Load explore posts as fallback if feed is empty
+      try {
+        const exploreRes = await api.get('/posts/explore?limit=50');
+        setPosts(exploreRes.data || []);
+      } catch (e) {
+        console.error('Error loading explore posts:', e);
+      }
     }
   };
 
@@ -57,7 +70,6 @@ export default function HomeScreen() {
   };
 
   const handleAddStory = async () => {
-    // Check if already has 10 stories
     if (myStories.length >= 10) {
       Alert.alert('Limit Reached', 'You can only add up to 10 stories');
       return;
@@ -104,6 +116,23 @@ export default function HomeScreen() {
     }
   };
 
+  const handleFollow = async (userId: string) => {
+    try {
+      const isFollowing = followingIds.includes(userId);
+      
+      if (isFollowing) {
+        await api.post(`/users/${userId}/unfollow`);
+        setFollowingIds(prev => prev.filter(id => id !== userId));
+      } else {
+        await api.post(`/users/${userId}/follow`);
+        setFollowingIds(prev => [...prev, userId]);
+      }
+    } catch (error) {
+      console.error('Error following/unfollowing:', error);
+      Alert.alert('Error', 'Failed to follow user');
+    }
+  };
+
   const handleLike = async (postId: string, isLiked: boolean) => {
     try {
       if (isLiked) {
@@ -125,7 +154,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Get user profile picture
   const getUserPicture = () => {
     if (user?.picture) {
       if (user.picture.startsWith('http')) {
@@ -136,20 +164,55 @@ export default function HomeScreen() {
     return 'https://via.placeholder.com/100';
   };
 
+  const renderHeader = () => (
+    <>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.logoContainer}>
+          <Image
+            source={require('../../assets/images/marb-logo.jpg')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.headerTitle}>MARB</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/notifications')}>
+            <Ionicons name="heart-outline" size={28} color={Colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/messages')}>
+            <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Stories Section */}
+      <View style={styles.storiesContainer}>
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={stories}
+          renderItem={renderStoryItem}
+          keyExtractor={(item, index) => `story-${index}`}
+          ListHeaderComponent={renderMyStory}
+          contentContainerStyle={styles.storiesList}
+        />
+      </View>
+    </>
+  );
+
   const renderMyStory = () => {
     const hasStory = myStories.length > 0;
     const storyCount = myStories.length;
     
     return (
       <View style={styles.storyItem}>
-        {/* Main story circle with tap to view */}
         <TouchableOpacity 
           style={styles.storyCircleContainer} 
           activeOpacity={0.7} 
           onPress={handleViewMyStory}
         >
           {hasStory ? (
-            // Has story - show gradient ring
             <LinearGradient
               colors={['#00d9ff', '#00ffcc', '#4fffb0']}
               style={styles.storyGradientRing}
@@ -164,7 +227,6 @@ export default function HomeScreen() {
               </View>
             </LinearGradient>
           ) : (
-            // No story - just show profile pic with border
             <View style={styles.storyNoRing}>
               <Image
                 source={{ uri: getUserPicture() }}
@@ -173,28 +235,22 @@ export default function HomeScreen() {
             </View>
           )}
           
-          {/* Plus button - always visible at bottom right */}
           <TouchableOpacity 
             style={styles.addStoryPlusButton}
             onPress={handleAddStory}
             activeOpacity={0.8}
           >
-            <Ionicons name="add" size={16} color="#fff" />
+            <Ionicons name="add" size={14} color="#fff" />
           </TouchableOpacity>
         </TouchableOpacity>
         
-        <Text style={styles.storyUsername} numberOfLines={1}>
-          Your story
-        </Text>
-        {hasStory && storyCount > 1 && (
-          <Text style={styles.storyCount}>{storyCount} stories</Text>
-        )}
+        <Text style={styles.storyUsername} numberOfLines={1}>Your story</Text>
+        {hasStory && <Text style={styles.storyCount}>{storyCount} stories</Text>}
       </View>
     );
   };
 
   const renderStoryItem = ({ item }) => {
-    // Get user picture
     const getStoryUserPic = () => {
       if (item.user?.picture) {
         if (item.user.picture.startsWith('http')) {
@@ -205,8 +261,6 @@ export default function HomeScreen() {
       return 'https://via.placeholder.com/100';
     };
 
-    const storyCount = item.stories?.length || 1;
-
     return (
       <TouchableOpacity 
         style={styles.storyItem} 
@@ -214,7 +268,6 @@ export default function HomeScreen() {
         onPress={() => router.push(`/story/view?userId=${item.user?.user_id}`)}
       >
         <View style={styles.storyCircleContainer}>
-          {/* Gradient ring for active story */}
           <LinearGradient
             colors={['#00d9ff', '#00ffcc', '#4fffb0']}
             style={styles.storyGradientRing}
@@ -238,8 +291,9 @@ export default function HomeScreen() {
 
   const renderPost = ({ item }) => {
     const isLiked = item.likes?.includes(user?.user_id);
+    const isFollowing = followingIds.includes(item.user?.user_id);
+    const isOwnPost = item.user?.user_id === user?.user_id;
     
-    // Get post user picture
     const getPostUserPic = () => {
       if (item.user?.picture) {
         if (item.user.picture.startsWith('http')) {
@@ -261,9 +315,22 @@ export default function HomeScreen() {
             <Text style={styles.postUserName}>{item.user?.username || item.user?.name}</Text>
             <Text style={styles.postUserId}>@{item.user?.username || 'user'}</Text>
           </View>
-          <TouchableOpacity style={styles.followButton}>
-            <Text style={styles.followButtonText}>Follow</Text>
-          </TouchableOpacity>
+          {!isOwnPost && (
+            <TouchableOpacity 
+              style={[
+                styles.followButton,
+                isFollowing && styles.followingButton
+              ]}
+              onPress={() => handleFollow(item.user?.user_id)}
+            >
+              <Text style={[
+                styles.followButtonText,
+                isFollowing && styles.followingButtonText
+              ]}>
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.moreButton}>
             <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textSecondary} />
           </TouchableOpacity>
@@ -318,44 +385,11 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.logoContainer}>
-          <Image
-            source={require('../../assets/images/marb-logo.jpg')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.headerTitle}>MARB</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/notifications')}>
-            <Ionicons name="heart-outline" size={28} color={Colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/messages')}>
-            <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Stories Section */}
-      <View style={styles.storiesContainer}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={stories}
-          renderItem={renderStoryItem}
-          keyExtractor={(item, index) => `story-${index}`}
-          ListHeaderComponent={renderMyStory}
-          contentContainerStyle={styles.storiesList}
-        />
-      </View>
-
-      {/* Posts Feed */}
       <FlatList
         data={posts}
         renderItem={renderPost}
         keyExtractor={(item) => item.post_id}
+        ListHeaderComponent={renderHeader}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -367,9 +401,11 @@ export default function HomeScreen() {
           <View style={styles.emptyContainer}>
             <Ionicons name="images-outline" size={64} color={Colors.textSecondary} />
             <Text style={styles.emptyText}>No posts yet</Text>
-            <Text style={styles.emptySubtext}>Follow users to see their posts</Text>
+            <Text style={styles.emptySubtext}>Pull down to refresh</Text>
           </View>
         }
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.flatListContent}
       />
     </SafeAreaView>
   );
@@ -379,6 +415,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  flatListContent: {
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
@@ -413,7 +452,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   storiesContainer: {
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
@@ -422,7 +461,7 @@ const styles = StyleSheet.create({
   },
   storyItem: {
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: 6,
     width: STORY_SIZE,
   },
   storyCircleContainer: {
@@ -440,7 +479,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: (STORY_SIZE - 6) / 2,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: Colors.background,
     overflow: 'hidden',
     backgroundColor: Colors.background,
@@ -455,35 +494,35 @@ const styles = StyleSheet.create({
     height: STORY_SIZE,
     borderRadius: STORY_SIZE / 2,
     borderWidth: 2,
-    borderColor: Colors.border,
+    borderColor: Colors.primary,
     overflow: 'hidden',
   },
   addStoryPlusButton: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: Colors.background,
   },
   storyUsername: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.text,
-    marginTop: 6,
+    marginTop: 4,
     textAlign: 'center',
   },
   storyCount: {
     fontSize: 10,
     color: Colors.textSecondary,
-    marginTop: 2,
+    marginTop: 1,
   },
   postCard: {
-    marginBottom: 16,
+    marginBottom: 8,
     backgroundColor: Colors.cardBackground,
   },
   postHeader: {
@@ -501,7 +540,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   postUserName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
   },
@@ -517,10 +556,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     marginRight: 8,
   },
+  followingButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   followButtonText: {
     fontSize: 13,
     fontWeight: '600',
     color: Colors.background,
+  },
+  followingButtonText: {
+    color: Colors.text,
   },
   moreButton: {
     padding: 4,
@@ -535,7 +582,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   leftActions: {
     flexDirection: 'row',
@@ -550,7 +597,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   likesCount: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
     marginBottom: 4,

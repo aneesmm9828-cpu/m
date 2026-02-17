@@ -1,14 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   RefreshControl,
   FlatList,
   Dimensions,
   Alert,
+  Animated,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +37,13 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [myStories, setMyStories] = useState([]);
   const [followingIds, setFollowingIds] = useState([]);
+  const [savedPosts, setSavedPosts] = useState([]);
+  
+  // Comments Modal
+  const [showComments, setShowComments] = useState(false);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const [comments, setComments] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -38,6 +52,9 @@ export default function HomeScreen() {
   useEffect(() => {
     if (user && user.following) {
       setFollowingIds(user.following);
+    }
+    if (user && user.saved_posts) {
+      setSavedPosts(user.saved_posts);
     }
   }, [user]);
 
@@ -128,7 +145,6 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error following/unfollowing:', error);
-      Alert.alert('Error', 'Failed to follow user');
     }
   };
 
@@ -150,6 +166,70 @@ export default function HomeScreen() {
       }));
     } catch (error) {
       console.error('Error liking post:', error);
+    }
+  };
+
+  const handleSavePost = async (postId) => {
+    try {
+      const isSaved = savedPosts.includes(postId);
+      if (isSaved) {
+        await api.post('/posts/' + postId + '/unsave');
+        setSavedPosts(savedPosts.filter(id => id !== postId));
+      } else {
+        await api.post('/posts/' + postId + '/save');
+        setSavedPosts([...savedPosts, postId]);
+      }
+    } catch (error) {
+      console.error('Error saving post:', error);
+    }
+  };
+
+  const handleSharePost = async (post) => {
+    try {
+      await Share.share({
+        message: 'Check out this post on MARB! ' + (post.caption || ''),
+        title: 'Share Post',
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const openComments = (post) => {
+    setSelectedPost(post);
+    setComments(post.comments || []);
+    setShowComments(true);
+  };
+
+  const handleAddComment = async () => {
+    if (!commentText.trim() || !selectedPost) return;
+    
+    try {
+      const response = await api.post('/posts/' + selectedPost.post_id + '/comment', {
+        text: commentText.trim()
+      });
+      
+      const newComment = {
+        comment_id: Date.now().toString(),
+        user_id: user.user_id,
+        user_name: user.name,
+        user_picture: user.picture,
+        text: commentText.trim(),
+        created_at: new Date().toISOString()
+      };
+      
+      setComments([...comments, newComment]);
+      setCommentText('');
+      
+      // Update post in list
+      setPosts(posts.map(p => {
+        if (p.post_id === selectedPost.post_id) {
+          return { ...p, comments: [...(p.comments || []), newComment] };
+        }
+        return p;
+      }));
+    } catch (error) {
+      console.error('Error adding comment:', error);
     }
   };
 
@@ -242,7 +322,6 @@ export default function HomeScreen() {
         </TouchableOpacity>
         
         <Text style={styles.storyUsername} numberOfLines={1}>Your story</Text>
-        {hasStory && <Text style={styles.storyCount}>{storyCount} stories</Text>}
       </View>
     );
   };
@@ -286,10 +365,15 @@ export default function HomeScreen() {
     );
   };
 
-  const renderPost = ({ item }) => {
+  const PostItem = ({ item }) => {
+    const [showHeart, setShowHeart] = useState(false);
+    const heartScale = useRef(new Animated.Value(0)).current;
+    const lastTap = useRef(0);
+    
     const isLiked = item.likes && user ? item.likes.includes(user.user_id) : false;
     const isFollowing = item.user ? followingIds.includes(item.user.user_id) : false;
     const isOwnPost = item.user && user ? item.user.user_id === user.user_id : false;
+    const isSaved = savedPosts.includes(item.post_id);
     
     const getPostUserPic = () => {
       if (item.user && item.user.picture) {
@@ -299,6 +383,35 @@ export default function HomeScreen() {
         return 'data:image/jpeg;base64,' + item.user.picture;
       }
       return 'https://via.placeholder.com/100';
+    };
+
+    const handleDoubleTap = () => {
+      const now = Date.now();
+      const DOUBLE_TAP_DELAY = 300;
+      
+      if (now - lastTap.current < DOUBLE_TAP_DELAY) {
+        // Double tap detected
+        if (!isLiked) {
+          handleLike(item.post_id, false);
+        }
+        // Show heart animation
+        setShowHeart(true);
+        heartScale.setValue(0);
+        Animated.sequence([
+          Animated.spring(heartScale, {
+            toValue: 1,
+            friction: 3,
+            useNativeDriver: true,
+          }),
+          Animated.delay(500),
+          Animated.timing(heartScale, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]).start(() => setShowHeart(false));
+      }
+      lastTap.current = now;
     };
     
     return (
@@ -327,11 +440,20 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <Image
-          source={{ uri: 'data:image/jpeg;base64,' + item.image }}
-          style={styles.postImage}
-          resizeMode="cover"
-        />
+        <TouchableWithoutFeedback onPress={handleDoubleTap}>
+          <View style={styles.postImageContainer}>
+            <Image
+              source={{ uri: 'data:image/jpeg;base64,' + item.image }}
+              style={styles.postImage}
+              resizeMode="cover"
+            />
+            {showHeart && (
+              <Animated.View style={[styles.heartAnimation, { transform: [{ scale: heartScale }] }]}>
+                <Ionicons name="heart" size={100} color="#fff" />
+              </Animated.View>
+            )}
+          </View>
+        </TouchableWithoutFeedback>
 
         <View style={styles.postActions}>
           <View style={styles.leftActions}>
@@ -339,37 +461,73 @@ export default function HomeScreen() {
               <Ionicons
                 name={isLiked ? "heart" : "heart-outline"}
                 size={28}
-                color={isLiked ? Colors.error : Colors.text}
+                color={isLiked ? '#ff3b5c' : Colors.text}
               />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => openComments(item)}>
               <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => handleSharePost(item)}>
               <Ionicons name="paper-plane-outline" size={26} color={Colors.text} />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity>
-            <Ionicons name="bookmark-outline" size={26} color={Colors.text} />
+          <TouchableOpacity onPress={() => handleSavePost(item.post_id)}>
+            <Ionicons 
+              name={isSaved ? "bookmark" : "bookmark-outline"} 
+              size={26} 
+              color={Colors.text} 
+            />
           </TouchableOpacity>
         </View>
 
         <View style={styles.postInfo}>
           <Text style={styles.likesCount}>{item.likes ? item.likes.length : 0} likes</Text>
           {item.caption && (
-            <Text style={styles.caption}>
+            <Text style={styles.caption} numberOfLines={2}>
               <Text style={styles.captionUsername}>{item.user ? (item.user.username || item.user.name) : 'User'} </Text>
               {item.caption}
             </Text>
           )}
           {item.comments && item.comments.length > 0 && (
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => openComments(item)}>
               <Text style={styles.viewComments}>
                 View all {item.comments.length} comments
               </Text>
             </TouchableOpacity>
           )}
         </View>
+      </View>
+    );
+  };
+
+  const renderPost = ({ item }) => <PostItem item={item} />;
+
+  const renderComment = ({ item }) => {
+    const getCommentUserPic = () => {
+      if (item.user_picture) {
+        if (item.user_picture.startsWith('http')) {
+          return item.user_picture;
+        }
+        return 'data:image/jpeg;base64,' + item.user_picture;
+      }
+      return 'https://via.placeholder.com/100';
+    };
+
+    return (
+      <View style={styles.commentItem}>
+        <Image source={{ uri: getCommentUserPic() }} style={styles.commentUserImage} />
+        <View style={styles.commentContent}>
+          <Text style={styles.commentText}>
+            <Text style={styles.commentUsername}>{item.user_name} </Text>
+            {item.text}
+          </Text>
+          <Text style={styles.commentTime}>
+            {item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}
+          </Text>
+        </View>
+        <TouchableOpacity>
+          <Ionicons name="heart-outline" size={14} color={Colors.textSecondary} />
+        </TouchableOpacity>
       </View>
     );
   };
@@ -398,6 +556,61 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.flatListContent}
       />
+
+      {/* Comments Modal */}
+      <Modal
+        visible={showComments}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowComments(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalContainer}
+        >
+          <View style={styles.commentsModal}>
+            <View style={styles.commentsHeader}>
+              <Text style={styles.commentsTitle}>Comments</Text>
+              <TouchableOpacity onPress={() => setShowComments(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+            
+            <FlatList
+              data={comments}
+              renderItem={renderComment}
+              keyExtractor={(item, index) => item.comment_id || index.toString()}
+              style={styles.commentsList}
+              ListEmptyComponent={
+                <View style={styles.noComments}>
+                  <Text style={styles.noCommentsText}>No comments yet</Text>
+                  <Text style={styles.noCommentsSubtext}>Be the first to comment</Text>
+                </View>
+              }
+            />
+            
+            <View style={styles.addCommentContainer}>
+              <Image source={{ uri: getUserPicture() }} style={styles.commentInputImage} />
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Add a comment..."
+                placeholderTextColor={Colors.textSecondary}
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
+              />
+              <TouchableOpacity 
+                onPress={handleAddComment}
+                disabled={!commentText.trim()}
+              >
+                <Text style={[styles.postButton, !commentText.trim() && styles.postButtonDisabled]}>
+                  Post
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -508,11 +721,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  storyCount: {
-    fontSize: 10,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
   postCard: {
     marginBottom: 8,
     backgroundColor: Colors.cardBackground,
@@ -564,10 +772,24 @@ const styles = StyleSheet.create({
   moreButton: {
     padding: 4,
   },
-  postImage: {
+  postImageContainer: {
     width: width,
     height: width,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  postImage: {
+    width: '100%',
+    height: '100%',
     backgroundColor: Colors.border,
+  },
+  heartAnimation: {
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
   },
   postActions: {
     flexDirection: 'row',
@@ -622,5 +844,102 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textSecondary,
     marginTop: 8,
+  },
+  // Comments Modal Styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  commentsModal: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: height * 0.7,
+  },
+  commentsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  commentsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  commentsList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  commentItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  commentUserImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentText: {
+    fontSize: 14,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  commentUsername: {
+    fontWeight: '600',
+  },
+  commentTime: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  noComments: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noCommentsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  noCommentsSubtext: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  addCommentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: 12,
+  },
+  commentInputImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  commentInput: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.text,
+    maxHeight: 80,
+  },
+  postButton: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  postButtonDisabled: {
+    opacity: 0.5,
   },
 });

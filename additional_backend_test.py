@@ -10,7 +10,7 @@ import sys
 
 def test_additional_endpoints():
     """Test additional endpoints"""
-    base_url = "https://aap-bidding.preview.emergentagent.com"
+    base_url = "https://marb-preview.preview.emergentagent.com"
     
     print("🔍 Additional Backend API Tests")
     print("=" * 50)

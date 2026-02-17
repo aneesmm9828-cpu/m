@@ -409,6 +409,7 @@ const styles = StyleSheet.create({
   },
   flatListContent: {
     flexGrow: 1,
+    paddingBottom: 100,
   },
   header: {
     flexDirection: 'row',

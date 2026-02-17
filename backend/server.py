@@ -634,15 +634,27 @@ async def delete_post(post_id: str, authorization: Optional[str] = Header(None),
 
 @api_router.post("/stories")
 async def create_story(story_data: StoryCreate, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
-    """Create a new story"""
+    """Create a new story (image or video, max 10 per day)"""
     current_user = await get_current_user(authorization, session_token)
+    
+    # Check story limit (max 10 stories per day)
+    now = datetime.now(timezone.utc)
+    existing_stories = await db.stories.count_documents({
+        "user_id": current_user.user_id,
+        "expires_at": {"$gt": now}
+    })
+    
+    if existing_stories >= 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 stories allowed. Please wait for existing stories to expire.")
     
     story = Story(
         story_id=f"story_{uuid.uuid4().hex[:12]}",
         user_id=current_user.user_id,
         image=story_data.image,
-        created_at=datetime.now(timezone.utc),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
+        media_type=story_data.media_type,
+        views=[],
+        created_at=now,
+        expires_at=now + timedelta(hours=24)
     )
     
     await db.stories.insert_one(story.dict())

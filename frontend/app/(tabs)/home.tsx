@@ -21,6 +21,7 @@ import { useAuthStore } from '../../store/authStore';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
+const STORY_SIZE = 80;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -56,6 +57,12 @@ export default function HomeScreen() {
   };
 
   const handleAddStory = async () => {
+    // Check if already has 10 stories
+    if (myStories.length >= 10) {
+      Alert.alert('Limit Reached', 'You can only add up to 10 stories');
+      return;
+    }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Camera roll permission is required');
@@ -66,15 +73,19 @@ export default function HomeScreen() {
       mediaTypes: ['images', 'videos'],
       allowsEditing: true,
       aspect: [9, 16],
-      quality: 0.8,
+      quality: 0.7,
       base64: true,
-      videoMaxDuration: 60,
+      videoMaxDuration: 30,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
+    if (!result.canceled && result.assets[0]) {
       try {
+        const asset = result.assets[0];
+        const isVideo = asset.type === 'video';
+        
         await api.post('/stories', {
-          image: result.assets[0].base64,
+          image: asset.base64,
+          media_type: isVideo ? 'video' : 'image',
         });
         Alert.alert('Success', 'Story uploaded!');
         await loadData();
@@ -82,6 +93,14 @@ export default function HomeScreen() {
         console.error('Error uploading story:', error);
         Alert.alert('Error', 'Failed to upload story');
       }
+    }
+  };
+
+  const handleViewMyStory = () => {
+    if (myStories.length > 0) {
+      router.push(`/story/view?userId=${user?.user_id}`);
+    } else {
+      handleAddStory();
     }
   };
 
@@ -106,80 +125,147 @@ export default function HomeScreen() {
     }
   };
 
+  // Get user profile picture
+  const getUserPicture = () => {
+    if (user?.picture) {
+      if (user.picture.startsWith('http')) {
+        return user.picture;
+      }
+      return `data:image/jpeg;base64,${user.picture}`;
+    }
+    return 'https://via.placeholder.com/100';
+  };
+
   const renderMyStory = () => {
     const hasStory = myStories.length > 0;
+    const storyCount = myStories.length;
     
     return (
-      <TouchableOpacity style={styles.storyItem} activeOpacity={0.7} onPress={handleAddStory}>
-        {hasStory ? (
-          <LinearGradient
-            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-            style={styles.storyGradient}
-          >
-            <View style={styles.storyInner}>
+      <View style={styles.storyItem}>
+        {/* Main story circle with tap to view */}
+        <TouchableOpacity 
+          style={styles.storyCircleContainer} 
+          activeOpacity={0.7} 
+          onPress={handleViewMyStory}
+        >
+          {hasStory ? (
+            // Has story - show gradient ring
+            <LinearGradient
+              colors={['#00d9ff', '#00ffcc', '#4fffb0']}
+              style={styles.storyGradientRing}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.storyInnerCircle}>
+                <Image
+                  source={{ uri: getUserPicture() }}
+                  style={styles.storyProfileImage}
+                />
+              </View>
+            </LinearGradient>
+          ) : (
+            // No story - just show profile pic with border
+            <View style={styles.storyNoRing}>
               <Image
-                source={{ uri: user?.picture || 'https://via.placeholder.com/100' }}
-                style={styles.storyImage}
+                source={{ uri: getUserPicture() }}
+                style={styles.storyProfileImage}
+              />
+            </View>
+          )}
+          
+          {/* Plus button - always visible at bottom right */}
+          <TouchableOpacity 
+            style={styles.addStoryPlusButton}
+            onPress={handleAddStory}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={16} color="#fff" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+        
+        <Text style={styles.storyUsername} numberOfLines={1}>
+          Your story
+        </Text>
+        {hasStory && storyCount > 1 && (
+          <Text style={styles.storyCount}>{storyCount} stories</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderStoryItem = ({ item }) => {
+    // Get user picture
+    const getStoryUserPic = () => {
+      if (item.user?.picture) {
+        if (item.user.picture.startsWith('http')) {
+          return item.user.picture;
+        }
+        return `data:image/jpeg;base64,${item.user.picture}`;
+      }
+      return 'https://via.placeholder.com/100';
+    };
+
+    const storyCount = item.stories?.length || 1;
+
+    return (
+      <TouchableOpacity 
+        style={styles.storyItem} 
+        activeOpacity={0.7}
+        onPress={() => router.push(`/story/view?userId=${item.user?.user_id}`)}
+      >
+        <View style={styles.storyCircleContainer}>
+          {/* Gradient ring for active story */}
+          <LinearGradient
+            colors={['#00d9ff', '#00ffcc', '#4fffb0']}
+            style={styles.storyGradientRing}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.storyInnerCircle}>
+              <Image
+                source={{ uri: getStoryUserPic() }}
+                style={styles.storyProfileImage}
               />
             </View>
           </LinearGradient>
-        ) : (
-          <View style={styles.addStoryContainer}>
-            <Image
-              source={{ uri: user?.picture || 'https://via.placeholder.com/100' }}
-              style={styles.storyImage}
-            />
-            <View style={styles.addStoryButton}>
-              <Ionicons name="add" size={20} color={Colors.background} />
-            </View>
-          </View>
-        )}
-        <Text style={styles.storyName} numberOfLines={1}>
-          {hasStory ? 'Your story' : 'Add story'}
+        </View>
+        <Text style={styles.storyUsername} numberOfLines={1}>
+          {item.user?.username || item.user?.name}
         </Text>
       </TouchableOpacity>
     );
   };
 
-  const renderStoryItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.storyItem} 
-      activeOpacity={0.7}
-      onPress={() => router.push(`/story/view?userId=${item.user?.user_id}`)}
-    >
-      <LinearGradient
-        colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-        style={styles.storyGradient}
-      >
-        <View style={styles.storyInner}>
-          <Image
-            source={{ uri: item.user?.picture || 'https://via.placeholder.com/100' }}
-            style={styles.storyImage}
-          />
-        </View>
-      </LinearGradient>
-      <Text style={styles.storyName} numberOfLines={1}>
-        {item.user?.username || item.user?.name}
-      </Text>
-    </TouchableOpacity>
-  );
-
   const renderPost = ({ item }) => {
     const isLiked = item.likes?.includes(user?.user_id);
+    
+    // Get post user picture
+    const getPostUserPic = () => {
+      if (item.user?.picture) {
+        if (item.user.picture.startsWith('http')) {
+          return item.user.picture;
+        }
+        return `data:image/jpeg;base64,${item.user.picture}`;
+      }
+      return 'https://via.placeholder.com/100';
+    };
     
     return (
       <View style={styles.postCard}>
         <View style={styles.postHeader}>
           <Image
-            source={{ uri: item.user?.picture || 'https://via.placeholder.com/100' }}
+            source={{ uri: getPostUserPic() }}
             style={styles.postUserImage}
           />
           <View style={styles.postUserInfo}>
-            <Text style={styles.postUserName}>{item.user?.name}</Text>
-            <Text style={styles.postTime}>2h ago</Text>
+            <Text style={styles.postUserName}>{item.user?.username || item.user?.name}</Text>
+            <Text style={styles.postUserId}>@{item.user?.username || 'user'}</Text>
           </View>
-          <TouchableOpacity>
-            <Ionicons name="ellipsis-horizontal" size={24} color={Colors.textSecondary} />
+          <TouchableOpacity style={styles.followButton}>
+            <Text style={styles.followButtonText}>Follow</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.moreButton}>
+            <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -243,9 +329,6 @@ export default function HomeScreen() {
           <Text style={styles.headerTitle}>MARB</Text>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/camera/capture')}>
-            <Ionicons name="camera-outline" size={28} color={Colors.text} />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/notifications')}>
             <Ionicons name="heart-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
@@ -255,14 +338,14 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Stories */}
+      {/* Stories Section */}
       <View style={styles.storiesContainer}>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
           data={stories}
           renderItem={renderStoryItem}
-          keyExtractor={(item, index) => index.toString()}
+          keyExtractor={(item, index) => `story-${index}`}
           ListHeaderComponent={renderMyStory}
           contentContainerStyle={styles.storiesList}
         />
@@ -309,28 +392,28 @@ const styles = StyleSheet.create({
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   logoImage: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: 10,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     color: Colors.text,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 18,
   },
   headerIcon: {
     padding: 4,
   },
   storiesContainer: {
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
@@ -339,53 +422,65 @@ const styles = StyleSheet.create({
   },
   storyItem: {
     alignItems: 'center',
-    marginHorizontal: 6,
-    width: 70,
+    marginHorizontal: 8,
+    width: STORY_SIZE,
   },
-  storyGradient: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  storyCircleContainer: {
+    width: STORY_SIZE,
+    height: STORY_SIZE,
+    position: 'relative',
+  },
+  storyGradientRing: {
+    width: STORY_SIZE,
+    height: STORY_SIZE,
+    borderRadius: STORY_SIZE / 2,
     padding: 3,
-    marginBottom: 4,
   },
-  storyInner: {
+  storyInnerCircle: {
     width: '100%',
     height: '100%',
-    borderRadius: 32,
+    borderRadius: (STORY_SIZE - 6) / 2,
     borderWidth: 3,
     borderColor: Colors.background,
     overflow: 'hidden',
+    backgroundColor: Colors.background,
   },
-  storyImage: {
+  storyProfileImage: {
     width: '100%',
     height: '100%',
+    borderRadius: STORY_SIZE / 2,
   },
-  addStoryContainer: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    overflow: 'hidden',
-    marginBottom: 4,
+  storyNoRing: {
+    width: STORY_SIZE,
+    height: STORY_SIZE,
+    borderRadius: STORY_SIZE / 2,
     borderWidth: 2,
     borderColor: Colors.border,
+    overflow: 'hidden',
   },
-  addStoryButton: {
+  addStoryPlusButton: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: Colors.background,
   },
-  storyName: {
+  storyUsername: {
     fontSize: 12,
     color: Colors.text,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  storyCount: {
+    fontSize: 10,
+    color: Colors.textSecondary,
+    marginTop: 2,
   },
   postCard: {
     marginBottom: 16,
@@ -410,10 +505,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
   },
-  postTime: {
+  postUserId: {
     fontSize: 12,
     color: Colors.textSecondary,
-    marginTop: 2,
+    marginTop: 1,
+  },
+  followButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.primary,
+    marginRight: 8,
+  },
+  followButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.background,
+  },
+  moreButton: {
+    padding: 4,
   },
   postImage: {
     width: width,

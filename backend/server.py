@@ -615,6 +615,54 @@ async def add_comment(post_id: str, comment_data: Comment, authorization: Option
     
     return comment
 
+@api_router.post("/posts/{post_id}/save")
+async def save_post(post_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Save a post to collection"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    post = await db.posts.find_one({"post_id": post_id}, {"_id": 0})
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Add to user's saved posts
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$addToSet": {"saved_posts": post_id}}
+    )
+    
+    return {"message": "Post saved"}
+
+@api_router.post("/posts/{post_id}/unsave")
+async def unsave_post(post_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Remove post from saved collection"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"saved_posts": post_id}}
+    )
+    
+    return {"message": "Post unsaved"}
+
+@api_router.get("/users/me/saved")
+async def get_saved_posts(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user's saved posts"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    saved_post_ids = user.get("saved_posts", [])
+    
+    posts = []
+    for post_id in saved_post_ids:
+        post = await db.posts.find_one({"post_id": post_id}, {"_id": 0})
+        if post:
+            # Get post author
+            author = await db.users.find_one({"user_id": post["user_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+            post["user"] = author
+            posts.append(post)
+    
+    return posts
+
 @api_router.delete("/posts/{post_id}")
 async def delete_post(post_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
     """Delete a post"""

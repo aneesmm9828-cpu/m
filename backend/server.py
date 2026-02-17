@@ -685,6 +685,57 @@ async def get_user_stories(user_id: str):
     }, {"_id": 0}).sort("created_at", -1).to_list(100)
     return stories
 
+@api_router.get("/stories/{story_id}")
+async def get_story(story_id: str):
+    """Get a single story"""
+    story = await db.stories.find_one({"story_id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return story
+
+@api_router.post("/stories/{story_id}/view")
+async def record_story_view(story_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Record that a user viewed a story"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    story = await db.stories.find_one({"story_id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    
+    # Add view if not already viewed
+    await db.stories.update_one(
+        {"story_id": story_id},
+        {"$addToSet": {"views": current_user.user_id}}
+    )
+    
+    return {"message": "View recorded"}
+
+@api_router.get("/stories/{story_id}/viewers")
+async def get_story_viewers(story_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get list of users who viewed a story (only for story owner)"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    story = await db.stories.find_one({"story_id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    
+    # Only story owner can see viewers
+    if story["user_id"] != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only story owner can see viewers")
+    
+    # Get viewer details
+    viewers = []
+    view_ids = story.get("views", [])
+    for viewer_id in view_ids:
+        viewer = await db.users.find_one({"user_id": viewer_id}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        if viewer:
+            viewers.append(viewer)
+    
+    return {
+        "view_count": len(view_ids),
+        "viewers": viewers
+    }
+
 # =============== REEL ROUTES ===============
 
 @api_router.post("/reels")

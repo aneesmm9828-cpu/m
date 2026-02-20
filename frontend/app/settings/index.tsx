@@ -96,37 +96,67 @@ export default function SettingsScreen() {
     },
   ];
 
-  const renderSettingItem = (item, index) => (
-    <TouchableOpacity
-      key={index}
-      style={styles.settingItem}
-      activeOpacity={0.7}
-    >
-      <View style={styles.settingLeft}>
-        <Ionicons name={item.icon} size={24} color={Colors.text} />
-        <View style={styles.settingTextContainer}>
-          <Text style={styles.settingLabel}>{item.label}</Text>
-          {item.subtitle && (
-            <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
-          )}
+  const renderSettingItem = (item, index) => {
+    const handlePress = () => {
+      // Navigate to appropriate screen based on label
+      switch (item.label) {
+        case 'Close friends':
+          router.push('/settings/close-friends');
+          break;
+        case 'Blocked':
+          router.push('/settings/blocked');
+          break;
+        case 'Muted accounts':
+          router.push('/settings/muted');
+          break;
+        case 'Restricted':
+          router.push('/settings/restricted');
+          break;
+        case 'Archiving and downloading':
+          router.push('/settings/archive');
+          break;
+        case 'Account privacy':
+          router.push('/settings/privacy');
+          break;
+        default:
+          // Handle other navigations
+          break;
+      }
+    };
+    
+    return (
+      <TouchableOpacity
+        key={index}
+        style={styles.settingItem}
+        activeOpacity={0.7}
+        onPress={!item.hasSwitch ? handlePress : undefined}
+      >
+        <View style={styles.settingLeft}>
+          <Ionicons name={item.icon} size={24} color={Colors.text} />
+          <View style={styles.settingTextContainer}>
+            <Text style={styles.settingLabel}>{item.label}</Text>
+            {item.subtitle && (
+              <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
+            )}
+          </View>
         </View>
-      </View>
-      {item.hasSwitch ? (
-        <Switch
-          value={privateAccount}
-          onValueChange={setPrivateAccount}
-          trackColor={{ false: Colors.border, true: Colors.primary }}
-        />
-      ) : (
-        <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
-      )}
-      {item.badge && (
-        <View style={styles.badge}>
-          <View style={styles.badgeDot} />
-        </View>
-      )}
-    </TouchableOpacity>
-  );
+        {item.hasSwitch ? (
+          <Switch
+            value={privateAccount}
+            onValueChange={setPrivateAccount}
+            trackColor={{ false: Colors.border, true: Colors.primary }}
+          />
+        ) : (
+          <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+        )}
+        {item.badge && (
+          <View style={styles.badge}>
+            <View style={styles.badgeDot} />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

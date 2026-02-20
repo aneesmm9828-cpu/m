@@ -1,54 +1,88 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   TextInput,
   Image,
   ActivityIndicator,
-  Modal,
   Alert,
   Dimensions,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/colors';
 import { api } from '../../utils/api';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Camera, CameraView } from 'expo-camera';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 export default function CreateScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('post'); // 'post', 'reel', 'story'
+  const [activeTab, setActiveTab] = useState('story'); // 'post', 'story', 'reel'
+  const [activeMode, setActiveMode] = useState('camera'); // 'camera', 'create', 'boomerang', 'layout'
   const [media, setMedia] = useState(null);
-  const [mediaType, setMediaType] = useState('image'); // 'image' or 'video'
+  const [mediaType, setMediaType] = useState('image');
   const [caption, setCaption] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showAIOptions, setShowAIOptions] = useState(false);
-  const [aiProvider, setAiProvider] = useState('openai');
-  const [aiLoading, setAiLoading] = useState(false);
+  const [hasPermission, setHasPermission] = useState(null);
+  const [cameraFacing, setCameraFacing] = useState('back');
+  const [flashMode, setFlashMode] = useState('off');
+  const [showPreview, setShowPreview] = useState(false);
+  const cameraRef = useRef(null);
 
-  const getAspectRatio = () => {
-    switch (activeTab) {
-      case 'post':
-        return [1, 1];
-      case 'reel':
-      case 'story':
-        return [9, 16];
-      default:
-        return [1, 1];
+  useEffect(() => {
+    (async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === 'granted');
+    })();
+  }, []);
+
+  const switchTab = (tab) => {
+    setActiveTab(tab);
+    setMedia(null);
+    setShowPreview(false);
+  };
+
+  const switchMode = (mode) => {
+    setActiveMode(mode);
+  };
+
+  const toggleCameraFacing = () => {
+    setCameraFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
+  const toggleFlash = () => {
+    setFlashMode(current => (current === 'off' ? 'on' : 'off'));
+  };
+
+  const takePicture = async () => {
+    if (cameraRef.current) {
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.8,
+          base64: true,
+        });
+        setMedia(photo.base64);
+        setMediaType('image');
+        setShowPreview(true);
+      } catch (error) {
+        console.error('Error taking picture:', error);
+        Alert.alert('Error', 'Failed to take picture');
+      }
     }
   };
 
-  const pickMedia = async () => {
+  const pickFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera roll permission is required');
+      Alert.alert('Permission needed', 'Gallery permission is required');
       return;
     }
 
@@ -57,78 +91,22 @@ export default function CreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: isReelOrStory ? ['images', 'videos'] : ['images'],
       allowsEditing: true,
-      aspect: getAspectRatio(),
+      aspect: activeTab === 'post' ? [1, 1] : [9, 16],
       quality: 0.8,
       base64: true,
       videoMaxDuration: activeTab === 'reel' ? 90 : 60,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
+    if (!result.canceled && result.assets[0]) {
       setMedia(result.assets[0].base64);
       setMediaType(result.assets[0].type === 'video' ? 'video' : 'image');
-    }
-  };
-
-  const takeMedia = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera permission is required');
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: getAspectRatio(),
-      quality: 0.8,
-      base64: true,
-      videoMaxDuration: activeTab === 'reel' ? 90 : 60,
-    });
-
-    if (!result.canceled && result.assets[0].base64) {
-      setMedia(result.assets[0].base64);
-      setMediaType(result.assets[0].type === 'video' ? 'video' : 'image');
-    }
-  };
-
-  const generateAICaption = async () => {
-    setAiLoading(true);
-    try {
-      const response = await api.post('/ai/caption', {
-        image_description: caption || 'a beautiful moment',
-        provider: aiProvider,
-      });
-      setCaption(response.data.caption);
-      Alert.alert('Success', 'AI caption generated!');
-    } catch (error) {
-      console.error('Error generating caption:', error);
-      Alert.alert('Error', 'Failed to generate caption');
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const generateAIImage = async () => {
-    setAiLoading(true);
-    try {
-      const prompt = caption || 'A beautiful landscape with mountains and sunset';
-      const response = await api.post('/ai/image', {
-        prompt,
-        provider: aiProvider,
-      });
-      setMedia(response.data.image);
-      setMediaType('image');
-      Alert.alert('Success', 'AI image generated!');
-    } catch (error) {
-      console.error('Error generating image:', error);
-      Alert.alert('Error', 'Failed to generate image');
-    } finally {
-      setAiLoading(false);
+      setShowPreview(true);
     }
   };
 
   const handlePost = async () => {
     if (!media) {
-      Alert.alert('Error', 'Please select media');
+      Alert.alert('Error', 'Please select or capture media');
       return;
     }
 
@@ -145,7 +123,6 @@ export default function CreateScreen() {
         payload = {
           video: media,
           caption: caption || null,
-          audio_name: 'Original audio',
         };
       } else if (activeTab === 'story') {
         endpoint = '/stories';
@@ -158,14 +135,15 @@ export default function CreateScreen() {
       await api.post(endpoint, payload);
       
       const successMessages = {
-        post: 'Post created successfully!',
-        reel: 'Reel posted successfully!',
-        story: 'Story uploaded successfully!',
+        post: 'Post shared!',
+        reel: 'Reel shared!',
+        story: 'Story shared!',
       };
       
       Alert.alert('Success', successMessages[activeTab]);
       setMedia(null);
       setCaption('');
+      setShowPreview(false);
       
       if (activeTab === 'reel') {
         router.push('/(tabs)/reels');
@@ -174,532 +152,477 @@ export default function CreateScreen() {
       }
     } catch (error) {
       console.error('Error creating:', error);
-      Alert.alert('Error', 'Failed to create ' + activeTab);
+      Alert.alert('Error', 'Failed to share. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const getMediaPreviewStyle = () => {
-    if (activeTab === 'post') {
-      return styles.squarePreview;
-    }
-    return styles.verticalPreview;
+  const discardMedia = () => {
+    setMedia(null);
+    setShowPreview(false);
+    setCaption('');
   };
 
-  const getPlaceholderStyle = () => {
-    if (activeTab === 'post') {
-      return styles.squarePlaceholder;
-    }
-    return styles.verticalPlaceholder;
-  };
+  // Preview Screen
+  if (showPreview && media) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.previewHeader}>
+          <TouchableOpacity onPress={discardMedia}>
+            <Ionicons name="arrow-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.previewTitle}>
+            {activeTab === 'post' ? 'New Post' : activeTab === 'reel' ? 'New Reel' : 'Your Story'}
+          </Text>
+          <View style={{ width: 28 }} />
+        </View>
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="close" size={28} color={Colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create</Text>
-        <TouchableOpacity onPress={() => setShowAIOptions(true)}>
-          <LinearGradient
-            colors={['#00d9ff', '#00ffcc']}
-            style={styles.aiButton}
-          >
-            <Ionicons name="sparkles" size={18} color="#000" />
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'post' && styles.activeTab]}
-          onPress={() => { setActiveTab('post'); setMedia(null); }}
-        >
-          <Ionicons name="grid-outline" size={20} color={activeTab === 'post' ? Colors.primary : Colors.textSecondary} />
-          <Text style={[styles.tabText, activeTab === 'post' && styles.activeTabText]}>Post</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'reel' && styles.activeTab]}
-          onPress={() => { setActiveTab('reel'); setMedia(null); }}
-        >
-          <Ionicons name="play-circle-outline" size={20} color={activeTab === 'reel' ? Colors.primary : Colors.textSecondary} />
-          <Text style={[styles.tabText, activeTab === 'reel' && styles.activeTabText]}>Reel</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'story' && styles.activeTab]}
-          onPress={() => { setActiveTab('story'); setMedia(null); }}
-        >
-          <Ionicons name="add-circle-outline" size={20} color={activeTab === 'story' ? Colors.primary : Colors.textSecondary} />
-          <Text style={[styles.tabText, activeTab === 'story' && styles.activeTabText]}>Story</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Media Preview */}
-        {media ? (
-          <View style={[styles.mediaContainer, getMediaPreviewStyle()]}>
+        <ScrollView style={styles.previewContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.previewImageContainer}>
             <Image
               source={{ uri: 'data:image/jpeg;base64,' + media }}
-              style={styles.mediaPreview}
+              style={[styles.previewImage, activeTab === 'post' && styles.squarePreview]}
               resizeMode="cover"
             />
             {mediaType === 'video' && (
-              <View style={styles.videoIndicator}>
-                <Ionicons name="play" size={40} color="#fff" />
+              <View style={styles.videoOverlay}>
+                <Ionicons name="play-circle" size={60} color="#fff" />
               </View>
             )}
-            <TouchableOpacity
-              style={styles.removeButton}
-              onPress={() => setMedia(null)}
-            >
-              <Ionicons name="close-circle" size={32} color="#fff" />
-            </TouchableOpacity>
           </View>
-        ) : (
-          <View style={[styles.placeholderContainer, getPlaceholderStyle()]}>
-            <View style={styles.uploadOptions}>
-              <TouchableOpacity style={styles.uploadOption} onPress={pickMedia}>
-                <View style={styles.uploadIconBg}>
-                  <Ionicons name="images" size={28} color={Colors.primary} />
-                </View>
-                <Text style={styles.uploadText}>Gallery</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.uploadOption} onPress={takeMedia}>
-                <View style={styles.uploadIconBg}>
-                  <Ionicons name="camera" size={28} color={Colors.primary} />
-                </View>
-                <Text style={styles.uploadText}>Camera</Text>
-              </TouchableOpacity>
+
+          {activeTab !== 'story' && (
+            <View style={styles.captionContainer}>
+              <TextInput
+                style={styles.captionInput}
+                placeholder="Write a caption..."
+                placeholderTextColor={Colors.textSecondary}
+                value={caption}
+                onChangeText={setCaption}
+                multiline
+                maxLength={2200}
+              />
             </View>
-            
-            <Text style={styles.hintText}>
-              {activeTab === 'post' && 'Square photos work best'}
-              {activeTab === 'reel' && 'Vertical videos up to 90 seconds'}
-              {activeTab === 'story' && 'Photos or videos up to 60 seconds'}
-            </Text>
-          </View>
-        )}
+          )}
 
-        {/* Caption Input (not for stories) */}
-        {activeTab !== 'story' && (
-          <View style={styles.captionContainer}>
-            <TextInput
-              style={styles.captionInput}
-              placeholder={activeTab === 'reel' ? 'Write a caption... Add #hashtags' : 'Write a caption...'}
-              placeholderTextColor={Colors.textSecondary}
-              value={caption}
-              onChangeText={setCaption}
-              multiline
-              maxLength={2200}
-            />
-            <Text style={styles.charCount}>{caption.length}/2200</Text>
-          </View>
-        )}
-
-        {/* Additional Options */}
-        <View style={styles.optionsContainer}>
-          <TouchableOpacity style={styles.optionItem}>
-            <Ionicons name="location-outline" size={22} color={Colors.text} />
-            <Text style={styles.optionText}>Add location</Text>
-            <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.optionItem}>
+          <TouchableOpacity style={styles.optionRow}>
             <Ionicons name="person-outline" size={22} color={Colors.text} />
             <Text style={styles.optionText}>Tag people</Text>
-            <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
           </TouchableOpacity>
-          
+
+          <TouchableOpacity style={styles.optionRow}>
+            <Ionicons name="location-outline" size={22} color={Colors.text} />
+            <Text style={styles.optionText}>Add location</Text>
+          </TouchableOpacity>
+
           {activeTab === 'reel' && (
-            <TouchableOpacity style={styles.optionItem}>
+            <TouchableOpacity style={styles.optionRow}>
               <Ionicons name="musical-notes-outline" size={22} color={Colors.text} />
               <Text style={styles.optionText}>Add music</Text>
-              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           )}
-        </View>
+        </ScrollView>
 
-        {/* Share Button */}
-        <TouchableOpacity
-          style={[styles.shareButton, !media && styles.shareButtonDisabled]}
-          onPress={handlePost}
-          disabled={loading || !media}
-          activeOpacity={0.8}
-        >
-          <LinearGradient
-            colors={media ? ['#00d9ff', '#00ffcc'] : [Colors.border, Colors.border]}
-            style={styles.shareButtonGradient}
+        <View style={styles.previewFooter}>
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={handlePost}
+            disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#000" />
-            ) : (
-              <>
-                <Text style={styles.shareButtonText}>
-                  {activeTab === 'post' && 'Share Post'}
-                  {activeTab === 'reel' && 'Share Reel'}
-                  {activeTab === 'story' && 'Share to Story'}
-                </Text>
-                <Ionicons name="arrow-forward" size={20} color="#000" />
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-      </ScrollView>
-
-      {/* AI Options Modal */}
-      <Modal
-        visible={showAIOptions}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAIOptions(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>AI Assistant</Text>
-              <TouchableOpacity onPress={() => setShowAIOptions(false)}>
-                <Ionicons name="close" size={28} color={Colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.providerContainer}>
-              <Text style={styles.sectionTitle}>Choose AI Provider</Text>
-              <View style={styles.providerButtons}>
-                <TouchableOpacity
-                  style={[styles.providerButton, aiProvider === 'openai' && styles.providerButtonActive]}
-                  onPress={() => setAiProvider('openai')}
-                >
-                  <Text style={[styles.providerButtonText, aiProvider === 'openai' && styles.providerButtonTextActive]}>
-                    OpenAI (GPT + DALL-E)
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.providerButton, aiProvider === 'gemini' && styles.providerButtonActive]}
-                  onPress={() => setAiProvider('gemini')}
-                >
-                  <Text style={[styles.providerButtonText, aiProvider === 'gemini' && styles.providerButtonTextActive]}>
-                    Google Gemini
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.aiActions}>
-              <TouchableOpacity
-                style={styles.aiActionButton}
-                onPress={generateAICaption}
-                disabled={aiLoading}
-              >
-                <Ionicons name="text" size={24} color={Colors.primary} />
-                <View style={styles.aiActionInfo}>
-                  <Text style={styles.aiActionText}>Generate Caption</Text>
-                  <Text style={styles.aiActionSubtext}>AI will create a caption</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.aiActionButton}
-                onPress={generateAIImage}
-                disabled={aiLoading}
-              >
-                <Ionicons name="image" size={24} color={Colors.primary} />
-                <View style={styles.aiActionInfo}>
-                  <Text style={styles.aiActionText}>Generate Image</Text>
-                  <Text style={styles.aiActionSubtext}>AI will create an image from caption</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {aiLoading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.loadingText}>AI is working...</Text>
-              </View>
-            )}
-          </View>
+            <LinearGradient
+              colors={['#00d9ff', '#00ffcc']}
+              style={styles.shareButtonGradient}
+            >
+              {loading ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <Text style={styles.shareButtonText}>Share</Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
-      </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+    );
+  }
+
+  // Camera Screen
+  return (
+    <View style={styles.container}>
+      {/* Camera View */}
+      {hasPermission ? (
+        <CameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing={cameraFacing}
+          flash={flashMode}
+        >
+          {/* Top Bar */}
+          <SafeAreaView style={styles.topBar} edges={['top']}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.topButton}>
+              <Ionicons name="close" size={30} color="#fff" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity onPress={toggleFlash} style={styles.topButton}>
+              <Ionicons 
+                name={flashMode === 'off' ? 'flash-off' : 'flash'} 
+                size={26} 
+                color="#fff" 
+              />
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.topButton}>
+              <Ionicons name="settings-outline" size={26} color="#fff" />
+            </TouchableOpacity>
+          </SafeAreaView>
+
+          {/* Side Tools */}
+          <View style={styles.sideTools}>
+            <TouchableOpacity 
+              style={[styles.sideTool, activeMode === 'create' && styles.activeModeTool]}
+              onPress={() => switchMode('create')}
+            >
+              <Text style={styles.aaText}>Aa</Text>
+              <Text style={styles.sideToolText}>Create</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.sideTool, activeMode === 'boomerang' && styles.activeModeTool]}
+              onPress={() => switchMode('boomerang')}
+            >
+              <MaterialCommunityIcons name="infinity" size={24} color="#fff" />
+              <Text style={styles.sideToolText}>Boomerang</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.sideTool, activeMode === 'layout' && styles.activeModeTool]}
+              onPress={() => switchMode('layout')}
+            >
+              <Ionicons name="grid-outline" size={22} color="#fff" />
+              <Text style={styles.sideToolText}>Layout</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sideTool}>
+              <Ionicons name="chevron-down" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Bottom Controls */}
+          <View style={styles.bottomControls}>
+            {/* Gallery & Capture & Switch Camera */}
+            <View style={styles.captureRow}>
+              <TouchableOpacity onPress={pickFromGallery} style={styles.galleryButton}>
+                <Ionicons name="images" size={26} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={takePicture} style={styles.captureButton}>
+                <View style={styles.captureOuter}>
+                  <View style={styles.captureInner} />
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={toggleCameraFacing} style={styles.switchCameraButton}>
+                <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Filter Circles */}
+            <View style={styles.filterRow}>
+              <View style={styles.filterCircle}>
+                <View style={styles.filterInner} />
+              </View>
+              <LinearGradient
+                colors={['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3']}
+                style={styles.filterCircle}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              />
+              <Image
+                source={{ uri: 'https://via.placeholder.com/50' }}
+                style={styles.filterCircle}
+              />
+            </View>
+
+            {/* Tab Bar */}
+            <View style={styles.tabBar}>
+              <TouchableOpacity onPress={pickFromGallery} style={styles.tabGalleryIcon}>
+                <Ionicons name="images-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.tabItem} 
+                onPress={() => switchTab('post')}
+              >
+                <Text style={[styles.tabText, activeTab === 'post' && styles.activeTabText]}>
+                  POST
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.tabItem} 
+                onPress={() => switchTab('story')}
+              >
+                <Text style={[styles.tabText, activeTab === 'story' && styles.activeTabText]}>
+                  STORY
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.tabItem} 
+                onPress={() => switchTab('reel')}
+              >
+                <Text style={[styles.tabText, activeTab === 'reel' && styles.activeTabText]}>
+                  REEL
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.tabGalleryIcon}>
+                <Ionicons name="sync-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </CameraView>
+      ) : (
+        <View style={styles.noCameraContainer}>
+          <Ionicons name="camera-outline" size={64} color={Colors.textSecondary} />
+          <Text style={styles.noCameraText}>Camera permission required</Text>
+          <TouchableOpacity style={styles.grantButton} onPress={pickFromGallery}>
+            <Text style={styles.grantButtonText}>Use Gallery Instead</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#000',
   },
-  header: {
+  camera: {
+    flex: 1,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  topButton: {
+    padding: 8,
+  },
+  sideTools: {
+    position: 'absolute',
+    left: 16,
+    top: '35%',
+    gap: 24,
+  },
+  sideTool: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeModeTool: {
+    opacity: 1,
+  },
+  aaText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+  },
+  sideToolText: {
+    fontSize: 11,
+    color: '#fff',
+    opacity: 0.9,
+  },
+  bottomControls: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+  },
+  captureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 50,
+    marginBottom: 20,
+  },
+  galleryButton: {
+    padding: 10,
+  },
+  captureButton: {
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureOuter: {
+    width: 75,
+    height: 75,
+    borderRadius: 40,
+    borderWidth: 4,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+  },
+  switchCameraButton: {
+    padding: 10,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 20,
+  },
+  filterCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#fff',
+    overflow: 'hidden',
+  },
+  filterInner: {
+    flex: 1,
+    backgroundColor: '#fff',
+    margin: 3,
+    borderRadius: 22,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  tabGalleryIcon: {
+    padding: 8,
+  },
+  tabItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 1,
+  },
+  activeTabText: {
+    color: '#fff',
+  },
+  noCameraContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  noCameraText: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+  },
+  grantButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+  },
+  grantButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  // Preview styles
+  previewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    backgroundColor: '#000',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  aiButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    gap: 6,
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: Colors.primary,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.textSecondary,
-  },
-  activeTabText: {
-    color: Colors.primary,
+  previewTitle: {
+    fontSize: 18,
     fontWeight: '600',
+    color: '#fff',
   },
-  scrollContent: {
-    paddingBottom: 100,
+  previewContent: {
+    flex: 1,
+    backgroundColor: Colors.background,
   },
-  mediaContainer: {
-    margin: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
+  previewImageContainer: {
+    width: '100%',
+    aspectRatio: 9 / 16,
+    maxHeight: height * 0.5,
     position: 'relative',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
   },
   squarePreview: {
     aspectRatio: 1,
   },
-  verticalPreview: {
-    aspectRatio: 9 / 16,
-    maxHeight: 450,
-  },
-  mediaPreview: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: Colors.border,
-  },
-  videoIndicator: {
+  videoOverlay: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -20 }, { translateY: -20 }],
-  },
-  removeButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-  },
-  placeholderContainer: {
-    margin: 16,
-    backgroundColor: Colors.cardBackground,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
-  },
-  squarePlaceholder: {
-    aspectRatio: 1,
-  },
-  verticalPlaceholder: {
-    aspectRatio: 9 / 16,
-    maxHeight: 400,
-  },
-  uploadOptions: {
-    flexDirection: 'row',
-    gap: 40,
-    marginBottom: 16,
-  },
-  uploadOption: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  uploadIconBg: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  uploadText: {
-    fontSize: 14,
-    color: Colors.text,
-    fontWeight: '500',
-  },
-  hintText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
   captionContainer: {
-    marginHorizontal: 16,
-    backgroundColor: Colors.cardBackground,
-    borderRadius: 12,
     padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   captionInput: {
     fontSize: 15,
     color: Colors.text,
-    minHeight: 80,
-    textAlignVertical: 'top',
+    minHeight: 60,
   },
-  charCount: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    marginTop: 8,
-  },
-  optionsContainer: {
-    marginTop: 16,
-    marginHorizontal: 16,
-  },
-  optionItem: {
+  optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-    gap: 12,
+    gap: 14,
   },
   optionText: {
-    flex: 1,
     fontSize: 15,
     color: Colors.text,
   },
-  shareButton: {
-    marginTop: 24,
-    marginHorizontal: 16,
+  previewFooter: {
+    padding: 16,
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
-  shareButtonDisabled: {
-    opacity: 0.5,
+  shareButton: {
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   shareButtonGradient: {
-    flexDirection: 'row',
+    paddingVertical: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
   },
   shareButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#000',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  providerContainer: {
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    marginBottom: 12,
-  },
-  providerButtons: {
-    gap: 10,
-  },
-  providerButton: {
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: Colors.cardBackground,
-    borderWidth: 2,
-    borderColor: Colors.border,
-  },
-  providerButtonActive: {
-    borderColor: Colors.primary,
-  },
-  providerButtonText: {
-    fontSize: 14,
-    color: Colors.text,
-    textAlign: 'center',
-  },
-  providerButtonTextActive: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  aiActions: {
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  aiActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: Colors.cardBackground,
-    borderRadius: 12,
-    gap: 12,
-  },
-  aiActionInfo: {
-    flex: 1,
-  },
-  aiActionText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  aiActionSubtext: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  loadingText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 12,
   },
 });

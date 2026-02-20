@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,39 +20,56 @@ import { api } from '../../utils/api';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
-type AIProvider = 'openai' | 'gemini';
+const { width } = Dimensions.get('window');
 
 export default function CreateScreen() {
   const router = useRouter();
-  const [image, setImage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('post'); // 'post', 'reel', 'story'
+  const [media, setMedia] = useState(null);
+  const [mediaType, setMediaType] = useState('image'); // 'image' or 'video'
   const [caption, setCaption] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAIOptions, setShowAIOptions] = useState(false);
-  const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
+  const [aiProvider, setAiProvider] = useState('openai');
   const [aiLoading, setAiLoading] = useState(false);
 
-  const pickImage = async () => {
+  const getAspectRatio = () => {
+    switch (activeTab) {
+      case 'post':
+        return [1, 1];
+      case 'reel':
+      case 'story':
+        return [9, 16];
+      default:
+        return [1, 1];
+    }
+  };
+
+  const pickMedia = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Camera roll permission is required');
       return;
     }
 
+    const isReelOrStory = activeTab === 'reel' || activeTab === 'story';
+    
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
+      mediaTypes: isReelOrStory ? ['images', 'videos'] : ['images'],
       allowsEditing: true,
-      aspect: [1, 1],
+      aspect: getAspectRatio(),
       quality: 0.8,
       base64: true,
-      videoMaxDuration: 60,
+      videoMaxDuration: activeTab === 'reel' ? 90 : 60,
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      setImage(result.assets[0].base64);
+      setMedia(result.assets[0].base64);
+      setMediaType(result.assets[0].type === 'video' ? 'video' : 'image');
     }
   };
 
-  const takePhoto = async () => {
+  const takeMedia = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Camera permission is required');
@@ -60,13 +78,15 @@ export default function CreateScreen() {
 
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
-      aspect: [1, 1],
+      aspect: getAspectRatio(),
       quality: 0.8,
       base64: true,
+      videoMaxDuration: activeTab === 'reel' ? 90 : 60,
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      setImage(result.assets[0].base64);
+      setMedia(result.assets[0].base64);
+      setMediaType(result.assets[0].type === 'video' ? 'video' : 'image');
     }
   };
 
@@ -95,119 +115,238 @@ export default function CreateScreen() {
         prompt,
         provider: aiProvider,
       });
-      setImage(response.data.image);
+      setMedia(response.data.image);
+      setMediaType('image');
       Alert.alert('Success', 'AI image generated!');
     } catch (error) {
       console.error('Error generating image:', error);
-      Alert.alert('Error', 'Failed to generate image. Please try again.');
+      Alert.alert('Error', 'Failed to generate image');
     } finally {
       setAiLoading(false);
     }
   };
 
   const handlePost = async () => {
-    if (!image) {
-      Alert.alert('Error', 'Please select or generate an image');
+    if (!media) {
+      Alert.alert('Error', 'Please select media');
       return;
     }
 
     setLoading(true);
     try {
-      await api.post('/posts', {
-        image,
+      let endpoint = '/posts';
+      let payload = {
+        image: media,
         caption: caption || null,
-      });
-      Alert.alert('Success', 'Post created successfully!');
-      setImage(null);
+      };
+
+      if (activeTab === 'reel') {
+        endpoint = '/reels';
+        payload = {
+          video: media,
+          caption: caption || null,
+          audio_name: 'Original audio',
+        };
+      } else if (activeTab === 'story') {
+        endpoint = '/stories';
+        payload = {
+          image: media,
+          media_type: mediaType,
+        };
+      }
+
+      await api.post(endpoint, payload);
+      
+      const successMessages = {
+        post: 'Post created successfully!',
+        reel: 'Reel posted successfully!',
+        story: 'Story uploaded successfully!',
+      };
+      
+      Alert.alert('Success', successMessages[activeTab]);
+      setMedia(null);
       setCaption('');
-      router.push('/(tabs)/home');
+      
+      if (activeTab === 'reel') {
+        router.push('/(tabs)/reels');
+      } else {
+        router.push('/(tabs)/home');
+      }
     } catch (error) {
-      console.error('Error creating post:', error);
-      Alert.alert('Error', 'Failed to create post');
+      console.error('Error creating:', error);
+      Alert.alert('Error', 'Failed to create ' + activeTab);
     } finally {
       setLoading(false);
     }
   };
 
+  const getMediaPreviewStyle = () => {
+    if (activeTab === 'post') {
+      return styles.squarePreview;
+    }
+    return styles.verticalPreview;
+  };
+
+  const getPlaceholderStyle = () => {
+    if (activeTab === 'post') {
+      return styles.squarePlaceholder;
+    }
+    return styles.verticalPlaceholder;
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Create Post</Text>
-          <TouchableOpacity onPress={() => setShowAIOptions(true)}>
-            <LinearGradient
-              colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
-              style={styles.aiButton}
-            >
-              <Ionicons name="sparkles" size={20} color={Colors.background} />
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="close" size={28} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create</Text>
+        <TouchableOpacity onPress={() => setShowAIOptions(true)}>
+          <LinearGradient
+            colors={['#00d9ff', '#00ffcc']}
+            style={styles.aiButton}
+          >
+            <Ionicons name="sparkles" size={18} color="#000" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
-        {/* Image Preview */}
-        {image ? (
-          <View style={styles.imageContainer}>
+      {/* Tabs */}
+      <View style={styles.tabsContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'post' && styles.activeTab]}
+          onPress={() => { setActiveTab('post'); setMedia(null); }}
+        >
+          <Ionicons name="grid-outline" size={20} color={activeTab === 'post' ? Colors.primary : Colors.textSecondary} />
+          <Text style={[styles.tabText, activeTab === 'post' && styles.activeTabText]}>Post</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'reel' && styles.activeTab]}
+          onPress={() => { setActiveTab('reel'); setMedia(null); }}
+        >
+          <Ionicons name="play-circle-outline" size={20} color={activeTab === 'reel' ? Colors.primary : Colors.textSecondary} />
+          <Text style={[styles.tabText, activeTab === 'reel' && styles.activeTabText]}>Reel</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'story' && styles.activeTab]}
+          onPress={() => { setActiveTab('story'); setMedia(null); }}
+        >
+          <Ionicons name="add-circle-outline" size={20} color={activeTab === 'story' ? Colors.primary : Colors.textSecondary} />
+          <Text style={[styles.tabText, activeTab === 'story' && styles.activeTabText]}>Story</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Media Preview */}
+        {media ? (
+          <View style={[styles.mediaContainer, getMediaPreviewStyle()]}>
             <Image
-              source={{ uri: `data:image/jpeg;base64,${image}` }}
-              style={styles.image}
+              source={{ uri: 'data:image/jpeg;base64,' + media }}
+              style={styles.mediaPreview}
               resizeMode="cover"
             />
+            {mediaType === 'video' && (
+              <View style={styles.videoIndicator}>
+                <Ionicons name="play" size={40} color="#fff" />
+              </View>
+            )}
             <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() => setImage(null)}
+              style={styles.removeButton}
+              onPress={() => setMedia(null)}
             >
-              <Ionicons name="close-circle" size={32} color={Colors.error} />
+              <Ionicons name="close-circle" size={32} color="#fff" />
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.placeholderContainer}>
-            <View style={styles.uploadButtons}>
-              <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
-                <Ionicons name="images-outline" size={32} color={Colors.primary} />
-                <Text style={styles.uploadButtonText}>Choose Photo</Text>
+          <View style={[styles.placeholderContainer, getPlaceholderStyle()]}>
+            <View style={styles.uploadOptions}>
+              <TouchableOpacity style={styles.uploadOption} onPress={pickMedia}>
+                <View style={styles.uploadIconBg}>
+                  <Ionicons name="images" size={28} color={Colors.primary} />
+                </View>
+                <Text style={styles.uploadText}>Gallery</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.uploadButton} onPress={takePhoto}>
-                <Ionicons name="camera-outline" size={32} color={Colors.primary} />
-                <Text style={styles.uploadButtonText}>Take Photo</Text>
+              
+              <TouchableOpacity style={styles.uploadOption} onPress={takeMedia}>
+                <View style={styles.uploadIconBg}>
+                  <Ionicons name="camera" size={28} color={Colors.primary} />
+                </View>
+                <Text style={styles.uploadText}>Camera</Text>
               </TouchableOpacity>
             </View>
+            
+            <Text style={styles.hintText}>
+              {activeTab === 'post' && 'Square photos work best'}
+              {activeTab === 'reel' && 'Vertical videos up to 90 seconds'}
+              {activeTab === 'story' && 'Photos or videos up to 60 seconds'}
+            </Text>
           </View>
         )}
 
-        {/* Caption Input */}
-        <View style={styles.captionContainer}>
-          <TextInput
-            style={styles.captionInput}
-            placeholder="Write a caption..."
-            placeholderTextColor={Colors.textSecondary}
-            value={caption}
-            onChangeText={setCaption}
-            multiline
-            maxLength={500}
-          />
-          <Text style={styles.characterCount}>{caption.length}/500</Text>
+        {/* Caption Input (not for stories) */}
+        {activeTab !== 'story' && (
+          <View style={styles.captionContainer}>
+            <TextInput
+              style={styles.captionInput}
+              placeholder={activeTab === 'reel' ? 'Write a caption... Add #hashtags' : 'Write a caption...'}
+              placeholderTextColor={Colors.textSecondary}
+              value={caption}
+              onChangeText={setCaption}
+              multiline
+              maxLength={2200}
+            />
+            <Text style={styles.charCount}>{caption.length}/2200</Text>
+          </View>
+        )}
+
+        {/* Additional Options */}
+        <View style={styles.optionsContainer}>
+          <TouchableOpacity style={styles.optionItem}>
+            <Ionicons name="location-outline" size={22} color={Colors.text} />
+            <Text style={styles.optionText}>Add location</Text>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.optionItem}>
+            <Ionicons name="person-outline" size={22} color={Colors.text} />
+            <Text style={styles.optionText}>Tag people</Text>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
+          
+          {activeTab === 'reel' && (
+            <TouchableOpacity style={styles.optionItem}>
+              <Ionicons name="musical-notes-outline" size={22} color={Colors.text} />
+              <Text style={styles.optionText}>Add music</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Post Button */}
+        {/* Share Button */}
         <TouchableOpacity
-          style={[styles.postButton, !image && styles.postButtonDisabled]}
+          style={[styles.shareButton, !media && styles.shareButtonDisabled]}
           onPress={handlePost}
-          disabled={loading || !image}
+          disabled={loading || !media}
           activeOpacity={0.8}
         >
           <LinearGradient
-            colors={image ? [Colors.primaryGradientStart, Colors.primaryGradientEnd] : [Colors.border, Colors.border]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.postButtonGradient}
+            colors={media ? ['#00d9ff', '#00ffcc'] : [Colors.border, Colors.border]}
+            style={styles.shareButtonGradient}
           >
             {loading ? (
-              <ActivityIndicator color={Colors.background} />
+              <ActivityIndicator color="#000" />
             ) : (
-              <Text style={styles.postButtonText}>
-                {image ? 'Share Post' : 'Select Image to Post'}
-              </Text>
+              <>
+                <Text style={styles.shareButtonText}>
+                  {activeTab === 'post' && 'Share Post'}
+                  {activeTab === 'reel' && 'Share Reel'}
+                  {activeTab === 'story' && 'Share to Story'}
+                </Text>
+                <Ionicons name="arrow-forward" size={20} color="#000" />
+              </>
             )}
           </LinearGradient>
         </TouchableOpacity>
@@ -229,46 +368,28 @@ export default function CreateScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Provider Selection */}
             <View style={styles.providerContainer}>
               <Text style={styles.sectionTitle}>Choose AI Provider</Text>
               <View style={styles.providerButtons}>
                 <TouchableOpacity
-                  style={[
-                    styles.providerButton,
-                    aiProvider === 'openai' && styles.providerButtonActive,
-                  ]}
+                  style={[styles.providerButton, aiProvider === 'openai' && styles.providerButtonActive]}
                   onPress={() => setAiProvider('openai')}
                 >
-                  <Text
-                    style={[
-                      styles.providerButtonText,
-                      aiProvider === 'openai' && styles.providerButtonTextActive,
-                    ]}
-                  >
-                    OpenAI GPT-4 + DALL-E
+                  <Text style={[styles.providerButtonText, aiProvider === 'openai' && styles.providerButtonTextActive]}>
+                    OpenAI (GPT + DALL-E)
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[
-                    styles.providerButton,
-                    aiProvider === 'gemini' && styles.providerButtonActive,
-                  ]}
+                  style={[styles.providerButton, aiProvider === 'gemini' && styles.providerButtonActive]}
                   onPress={() => setAiProvider('gemini')}
                 >
-                  <Text
-                    style={[
-                      styles.providerButtonText,
-                      aiProvider === 'gemini' && styles.providerButtonTextActive,
-                    ]}
-                  >
-                    Google Gemini + Nano Banana
+                  <Text style={[styles.providerButtonText, aiProvider === 'gemini' && styles.providerButtonTextActive]}>
+                    Google Gemini
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* AI Actions */}
             <View style={styles.aiActions}>
               <TouchableOpacity
                 style={styles.aiActionButton}
@@ -276,8 +397,10 @@ export default function CreateScreen() {
                 disabled={aiLoading}
               >
                 <Ionicons name="text" size={24} color={Colors.primary} />
-                <Text style={styles.aiActionText}>Generate Caption</Text>
-                <Text style={styles.aiActionSubtext}>AI will create a caption</Text>
+                <View style={styles.aiActionInfo}>
+                  <Text style={styles.aiActionText}>Generate Caption</Text>
+                  <Text style={styles.aiActionSubtext}>AI will create a caption</Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -286,8 +409,10 @@ export default function CreateScreen() {
                 disabled={aiLoading}
               >
                 <Ionicons name="image" size={24} color={Colors.primary} />
-                <Text style={styles.aiActionText}>Generate Image</Text>
-                <Text style={styles.aiActionSubtext}>AI will create an image</Text>
+                <View style={styles.aiActionInfo}>
+                  <Text style={styles.aiActionText}>Generate Image</Text>
+                  <Text style={styles.aiActionSubtext}>AI will create an image from caption</Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -319,37 +444,77 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: Colors.text,
   },
   aiButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  imageContainer: {
-    marginTop: 16,
-    marginHorizontal: 16,
+  tabsContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 6,
+  },
+  activeTab: {
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.primary,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+  },
+  activeTabText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  mediaContainer: {
+    margin: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
     position: 'relative',
   },
-  image: {
-    width: '100%',
+  squarePreview: {
     aspectRatio: 1,
-    borderRadius: 12,
+  },
+  verticalPreview: {
+    aspectRatio: 9 / 16,
+    maxHeight: 450,
+  },
+  mediaPreview: {
+    width: '100%',
+    height: '100%',
     backgroundColor: Colors.border,
   },
-  removeImageButton: {
+  videoIndicator: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -20 }, { translateY: -20 }],
+  },
+  removeButton: {
     position: 'absolute',
     top: 8,
     right: 8,
   },
   placeholderContainer: {
-    marginTop: 16,
-    marginHorizontal: 16,
-    aspectRatio: 1,
+    margin: 16,
     backgroundColor: Colors.cardBackground,
     borderRadius: 12,
     borderWidth: 2,
@@ -357,97 +522,137 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
   },
-  uploadButtons: {
+  squarePlaceholder: {
+    aspectRatio: 1,
+  },
+  verticalPlaceholder: {
+    aspectRatio: 9 / 16,
+    maxHeight: 400,
+  },
+  uploadOptions: {
     flexDirection: 'row',
-    gap: 24,
+    gap: 40,
+    marginBottom: 16,
   },
-  uploadButton: {
+  uploadOption: {
     alignItems: 'center',
-    padding: 20,
+    gap: 8,
   },
-  uploadButtonText: {
+  uploadIconBg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primary + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  uploadText: {
     fontSize: 14,
     color: Colors.text,
-    marginTop: 8,
+    fontWeight: '500',
+  },
+  hintText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
   },
   captionContainer: {
-    marginTop: 16,
     marginHorizontal: 16,
     backgroundColor: Colors.cardBackground,
     borderRadius: 12,
     padding: 16,
   },
   captionInput: {
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.text,
-    minHeight: 100,
+    minHeight: 80,
     textAlignVertical: 'top',
   },
-  characterCount: {
+  charCount: {
     fontSize: 12,
     color: Colors.textSecondary,
     textAlign: 'right',
     marginTop: 8,
   },
-  postButton: {
+  optionsContainer: {
+    marginTop: 16,
+    marginHorizontal: 16,
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: 12,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: 15,
+    color: Colors.text,
+  },
+  shareButton: {
     marginTop: 24,
     marginHorizontal: 16,
-    marginBottom: 32,
   },
-  postButtonDisabled: {
+  shareButtonDisabled: {
     opacity: 0.5,
   },
-  postButtonGradient: {
+  shareButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 16,
     borderRadius: 12,
-    alignItems: 'center',
+    gap: 8,
   },
-  postButtonText: {
-    fontSize: 18,
+  shareButtonText: {
+    fontSize: 16,
     fontWeight: '600',
-    color: Colors.background,
+    color: '#000',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: Colors.cardBackground,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingBottom: 32,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 40,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
     color: Colors.text,
   },
   providerContainer: {
-    padding: 20,
+    padding: 16,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.text,
+    color: Colors.textSecondary,
     marginBottom: 12,
   },
   providerButtons: {
-    gap: 12,
+    gap: 10,
   },
   providerButton: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
+    padding: 14,
+    borderRadius: 10,
+    backgroundColor: Colors.cardBackground,
     borderWidth: 2,
     borderColor: Colors.border,
   },
@@ -455,7 +660,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   providerButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     color: Colors.text,
     textAlign: 'center',
   },
@@ -464,29 +669,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   aiActions: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     gap: 12,
   },
   aiActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.cardBackground,
     borderRadius: 12,
     gap: 12,
   },
-  aiActionText: {
+  aiActionInfo: {
     flex: 1,
-    fontSize: 16,
+  },
+  aiActionText: {
+    fontSize: 15,
     fontWeight: '600',
     color: Colors.text,
   },
   aiActionSubtext: {
     fontSize: 12,
     color: Colors.textSecondary,
-    position: 'absolute',
-    left: 56,
-    bottom: 12,
+    marginTop: 2,
   },
   loadingContainer: {
     alignItems: 'center',

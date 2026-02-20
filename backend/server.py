@@ -640,6 +640,21 @@ async def get_restricted_users(authorization: Optional[str] = Header(None), sess
     
     return restricted
 
+@api_router.get("/users/{user_id}/posts")
+async def get_user_posts(user_id: str, skip: int = 0, limit: int = 50):
+    """Get all posts by a specific user"""
+    posts = await db.posts.find(
+        {"user_id": user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with user data
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    for post in posts:
+        post["user"] = user
+    
+    return posts
+
 @api_router.get("/users/search/{query}")
 async def search_users(query: str):
     """Search users by name or username"""

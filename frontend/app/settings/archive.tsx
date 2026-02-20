@@ -6,7 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   Image,
-  Dimensions,
+  RefreshControl,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,20 +14,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/colors';
 import { api } from '../../utils/api';
-import { useAuthStore } from '../../store/authStore';
-
-const { width } = Dimensions.get('window');
-const imageSize = (width - 6) / 3;
 
 export default function ArchiveScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  
-  const [activeTab, setActiveTab] = useState('posts'); // posts, stories, reels
-  const [archivedPosts, setArchivedPosts] = useState([]);
-  const [archivedStories, setArchivedStories] = useState([]);
-  const [archivedReels, setArchivedReels] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('posts');
+  const [posts, setPosts] = useState([]);
+  const [stories, setStories] = useState([]);
+  const [reels, setReels] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadArchive();
@@ -35,124 +29,94 @@ export default function ArchiveScreen() {
 
   const loadArchive = async () => {
     try {
+      // Load archived content
       const [postsRes, storiesRes, reelsRes] = await Promise.all([
-        api.get('/users/me/archive/posts').catch(() => ({ data: [] })),
-        api.get('/users/me/archive/stories').catch(() => ({ data: [] })),
-        api.get('/users/me/archive/reels').catch(() => ({ data: [] })),
+        api.get('/archive/posts').catch(() => ({ data: [] })),
+        api.get('/archive/stories').catch(() => ({ data: [] })),
+        api.get('/archive/reels').catch(() => ({ data: [] })),
       ]);
-      setArchivedPosts(postsRes.data || []);
-      setArchivedStories(storiesRes.data || []);
-      setArchivedReels(reelsRes.data || []);
+      setPosts(postsRes.data || []);
+      setStories(storiesRes.data || []);
+      setReels(reelsRes.data || []);
     } catch (error) {
       console.error('Error loading archive:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleUnarchive = (item, type) => {
-    Alert.alert(
-      'Unarchive',
-      'Show this on your profile?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unarchive',
-          onPress: async () => {
-            try {
-              await api.post('/' + type + '/' + (item.post_id || item.story_id || item.reel_id) + '/unarchive');
-              loadArchive();
-            } catch (error) {
-              console.error('Error unarchiving:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleDelete = (item, type) => {
-    Alert.alert(
-      'Delete',
-      'Delete permanently?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete('/' + type + '/' + (item.post_id || item.story_id || item.reel_id));
-              loadArchive();
-            } catch (error) {
-              console.error('Error deleting:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const renderItem = ({ item }) => {
-    const imageSource = item.image || item.video;
-    const itemId = item.post_id || item.story_id || item.reel_id;
-    const type = item.post_id ? 'posts' : item.story_id ? 'stories' : 'reels';
-    
-    return (
-      <TouchableOpacity 
-        style={styles.itemContainer}
-        onLongPress={() => {
-          Alert.alert(
-            'Options',
-            'What would you like to do?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Unarchive', onPress: () => handleUnarchive(item, type) },
-              { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item, type) },
-            ]
-          );
-        }}
-      >
-        <Image
-          source={{ uri: 'data:image/jpeg;base64,' + imageSource }}
-          style={styles.itemImage}
-          resizeMode="cover"
-        />
-        {item.is_reel || item.reel_id && (
-          <View style={styles.reelIndicator}>
-            <Ionicons name="play" size={14} color="#fff" />
-          </View>
-        )}
-        <View style={styles.dateOverlay}>
-          <Text style={styles.dateText}>
-            {item.created_at ? new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadArchive();
+    setRefreshing(false);
   };
 
   const getActiveData = () => {
     switch (activeTab) {
       case 'posts':
-        return archivedPosts;
+        return posts;
       case 'stories':
-        return archivedStories;
+        return stories;
       case 'reels':
-        return archivedReels;
+        return reels;
       default:
         return [];
     }
   };
 
+  const renderItem = ({ item }) => {
+    const getImage = () => {
+      if (item.image) {
+        return item.image.startsWith('http') ? item.image : 'data:image/jpeg;base64,' + item.image;
+      }
+      if (item.video) {
+        return 'data:video/mp4;base64,' + item.video;
+      }
+      return 'https://via.placeholder.com/150';
+    };
+
+    return (
+      <TouchableOpacity style={styles.gridItem}>
+        <Image source={{ uri: getImage() }} style={styles.gridImage} />
+        {(activeTab === 'reels' || item.media_type === 'video') && (
+          <View style={styles.videoIndicator}>
+            <Ionicons name="play" size={16} color="#fff" />
+          </View>
+        )}
+        {activeTab === 'stories' && (
+          <View style={styles.storyDate}>
+            <Text style={styles.storyDateText}>{new Date(item.created_at).toLocaleDateString()}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIcon}>
+        <Ionicons 
+          name={activeTab === 'posts' ? 'grid-outline' : activeTab === 'stories' ? 'time-outline' : 'play-circle-outline'} 
+          size={48} 
+          color={Colors.textSecondary} 
+        />
+      </View>
+      <Text style={styles.emptyTitle}>No archived {activeTab}</Text>
+      <Text style={styles.emptySubtext}>
+        {activeTab === 'posts' && 'When you archive posts, they will appear here'}
+        {activeTab === 'stories' && 'Stories that have expired will be saved here'}
+        {activeTab === 'reels' && 'Archived reels will show up here'}
+      </Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+          <Ionicons name="arrow-back" size={28} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Archive</Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 28 }} />
       </View>
 
       {/* Tabs */}
@@ -194,39 +158,21 @@ export default function ArchiveScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Info Banner */}
-      <View style={styles.infoBanner}>
-        <Ionicons name="information-circle-outline" size={20} color={Colors.primary} />
-        <Text style={styles.infoText}>
-          Only you can see your archived {activeTab}. Long press to unarchive or delete.
-        </Text>
-      </View>
-
-      {/* Content */}
+      {/* Content Grid */}
       <FlatList
         data={getActiveData()}
         renderItem={renderItem}
-        keyExtractor={(item) => item.post_id || item.story_id || item.reel_id || Math.random().toString()}
+        keyExtractor={(item, index) => item.post_id || item.story_id || item.reel_id || index.toString()}
         numColumns={3}
-        columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.gridContent}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons 
-              name={activeTab === 'posts' ? 'grid-outline' : activeTab === 'stories' ? 'time-outline' : 'play-circle-outline'} 
-              size={64} 
-              color={Colors.textSecondary} 
-            />
-            <Text style={styles.emptyTitle}>No archived {activeTab}</Text>
-            <Text style={styles.emptyText}>
-              {activeTab === 'posts' 
-                ? "Posts you archive will appear here" 
-                : activeTab === 'stories'
-                ? "Your expired stories will appear here"
-                : "Reels you archive will appear here"}
-            </Text>
-          </View>
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.primary}
+          />
         }
+        ListEmptyComponent={renderEmptyState}
+        contentContainerStyle={getActiveData().length === 0 ? styles.emptyList : null}
       />
     </SafeAreaView>
   );
@@ -261,7 +207,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
     gap: 6,
   },
   activeTab: {
@@ -269,79 +215,70 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.primary,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textSecondary,
   },
   activeTabText: {
     color: Colors.primary,
     fontWeight: '600',
   },
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primary + '15',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 13,
-    color: Colors.text,
-    lineHeight: 18,
-  },
-  row: {
-    gap: 2,
-  },
-  gridContent: {
-    paddingBottom: 100,
-  },
-  itemContainer: {
-    width: imageSize,
-    height: imageSize,
-    marginBottom: 2,
+  gridItem: {
+    width: '33.33%',
+    aspectRatio: 1,
     position: 'relative',
   },
-  itemImage: {
+  gridImage: {
     width: '100%',
     height: '100%',
-    backgroundColor: Colors.border,
+    borderWidth: 0.5,
+    borderColor: Colors.border,
   },
-  reelIndicator: {
+  videoIndicator: {
     position: 'absolute',
     top: 8,
     right: 8,
   },
-  dateOverlay: {
+  storyDate: {
     position: 'absolute',
-    bottom: 4,
-    left: 4,
+    bottom: 8,
+    left: 8,
     backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
-  dateText: {
+  storyDateText: {
     fontSize: 10,
     color: '#fff',
   },
+  emptyList: {
+    flex: 1,
+  },
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 32,
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: Colors.textSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: Colors.text,
-    marginTop: 16,
+    marginBottom: 8,
   },
-  emptyText: {
+  emptySubtext: {
     fontSize: 14,
     color: Colors.textSecondary,
     textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
   },
 });

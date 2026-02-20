@@ -1090,6 +1090,61 @@ async def get_conversations(authorization: Optional[str] = Header(None), session
     
     return list(conversations.values())
 
+# =============== NOTES ROUTES ===============
+
+@api_router.get("/notes")
+async def get_notes(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get notes from users you follow"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    # Get user's following list
+    user_data = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "following": 1})
+    following = user_data.get("following", []) if user_data else []
+    following.append(current_user.user_id)  # Include own note
+    
+    # Get notes from followed users (only last 24 hours)
+    now = datetime.now(timezone.utc)
+    yesterday = now - timedelta(hours=24)
+    
+    notes = await db.notes.find({
+        "user_id": {"$in": following},
+        "created_at": {"$gte": yesterday}
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    # Add user info
+    for note in notes:
+        user = await db.users.find_one({"user_id": note["user_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        note["user"] = user
+    
+    return notes
+
+@api_router.post("/notes")
+async def create_note(note_data: dict, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a new note (24hr status)"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    # Delete existing note if any
+    await db.notes.delete_many({"user_id": current_user.user_id})
+    
+    note = {
+        "note_id": f"note_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "text": note_data.get("text", "")[:60],  # Max 60 chars
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(hours=24)
+    }
+    
+    await db.notes.insert_one(note)
+    return note
+
+@api_router.delete("/notes/me")
+async def delete_my_note(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Delete own note"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.notes.delete_many({"user_id": current_user.user_id})
+    return {"message": "Note deleted"}
+
 @api_router.get("/messages/chat/{user_id}")
 async def get_chat(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
     """Get messages with a specific user"""

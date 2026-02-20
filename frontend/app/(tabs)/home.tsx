@@ -419,7 +419,11 @@ export default function HomeScreen() {
     
     return (
       <View style={styles.postCard}>
-        <View style={styles.postHeader}>
+        <TouchableOpacity 
+          style={styles.postHeader}
+          onPress={() => item.user && router.push('/profile/' + item.user.user_id)}
+          activeOpacity={0.7}
+        >
           <Image
             source={{ uri: getPostUserPic() }}
             style={styles.postUserImage}
@@ -431,19 +435,26 @@ export default function HomeScreen() {
           {!isOwnPost && (
             <TouchableOpacity 
               style={[styles.followButton, isFollowing && styles.followingButton]}
-              onPress={() => item.user && handleFollow(item.user.user_id)}
+              onPress={(e) => {
+                e.stopPropagation();
+                item.user && handleFollow(item.user.user_id);
+              }}
             >
               <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.moreButton}>
+          <TouchableOpacity style={styles.moreButton} onPress={(e) => e.stopPropagation()}>
             <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textSecondary} />
           </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
 
-        <TouchableWithoutFeedback onPress={handleDoubleTap}>
+        <TouchableOpacity 
+          activeOpacity={0.9}
+          onPress={() => router.push('/post/' + item.post_id)}
+          onLongPress={handleDoubleTap}
+        >
           <View style={styles.postImageContainer}>
             <Image
               source={{ uri: 'data:image/jpeg;base64,' + item.image }}
@@ -456,7 +467,7 @@ export default function HomeScreen() {
               </Animated.View>
             )}
           </View>
-        </TouchableWithoutFeedback>
+        </TouchableOpacity>
 
         <View style={styles.postActions}>
           <View style={styles.leftActions}>

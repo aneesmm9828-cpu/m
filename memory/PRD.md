@@ -202,4 +202,12 @@ User wants to build a complete, production-ready, Instagram-style social media m
 - [ ] Shop tab
 
 ## Last Updated
-December 2025
+February 2026
+
+## Recent Updates (Feb 2026)
+- Added Camera icon in header (next to heart icon)
+- Post photo click opens post detail
+- User profile/name click opens their profile
+- Created `/profile/[id].tsx` for viewing other users
+- Added `/api/users/{user_id}/posts` endpoint
+- Instagram-style Create screen with POST/STORY/REEL tabs

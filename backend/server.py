@@ -459,6 +459,187 @@ async def unfollow_user(user_id: str, authorization: Optional[str] = Header(None
     
     return {"message": "Unfollowed user"}
 
+# =============== CLOSE FRIENDS ROUTES ===============
+
+@api_router.post("/users/{user_id}/close-friends")
+async def add_close_friend(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Add user to close friends list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$addToSet": {"close_friends": user_id}}
+    )
+    
+    return {"message": "Added to close friends"}
+
+@api_router.delete("/users/{user_id}/close-friends")
+async def remove_close_friend(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Remove user from close friends list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"close_friends": user_id}}
+    )
+    
+    return {"message": "Removed from close friends"}
+
+@api_router.get("/users/me/close-friends")
+async def get_close_friends(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get current user's close friends list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "close_friends": 1})
+    close_friend_ids = user.get("close_friends", [])
+    
+    if not close_friend_ids:
+        return []
+    
+    friends = await db.users.find(
+        {"user_id": {"$in": close_friend_ids}},
+        {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1}
+    ).to_list(100)
+    
+    return friends
+
+# =============== MUTE/RESTRICT/BLOCK ROUTES ===============
+
+@api_router.post("/users/{user_id}/mute")
+async def mute_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Mute a user's posts and stories"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$addToSet": {"muted_users": user_id}}
+    )
+    
+    return {"message": "User muted"}
+
+@api_router.delete("/users/{user_id}/mute")
+async def unmute_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Unmute a user"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"muted_users": user_id}}
+    )
+    
+    return {"message": "User unmuted"}
+
+@api_router.post("/users/{user_id}/restrict")
+async def restrict_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Restrict a user"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$addToSet": {"restricted_users": user_id}}
+    )
+    
+    return {"message": "User restricted"}
+
+@api_router.delete("/users/{user_id}/restrict")
+async def unrestrict_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Unrestrict a user"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"restricted_users": user_id}}
+    )
+    
+    return {"message": "User unrestricted"}
+
+@api_router.post("/users/{user_id}/block")
+async def block_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Block a user"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    # Block and also unfollow each other
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {
+            "$addToSet": {"blocked_users": user_id},
+            "$pull": {"following": user_id, "followers": user_id}
+        }
+    )
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$pull": {"following": current_user.user_id, "followers": current_user.user_id}}
+    )
+    
+    return {"message": "User blocked"}
+
+@api_router.delete("/users/{user_id}/block")
+async def unblock_user(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Unblock a user"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    await db.users.update_one(
+        {"user_id": current_user.user_id},
+        {"$pull": {"blocked_users": user_id}}
+    )
+    
+    return {"message": "User unblocked"}
+
+@api_router.get("/users/me/blocked")
+async def get_blocked_users(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get current user's blocked list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "blocked_users": 1})
+    blocked_ids = user.get("blocked_users", [])
+    
+    if not blocked_ids:
+        return []
+    
+    blocked = await db.users.find(
+        {"user_id": {"$in": blocked_ids}},
+        {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1}
+    ).to_list(100)
+    
+    return blocked
+
+@api_router.get("/users/me/muted")
+async def get_muted_users(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get current user's muted list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "muted_users": 1})
+    muted_ids = user.get("muted_users", [])
+    
+    if not muted_ids:
+        return []
+    
+    muted = await db.users.find(
+        {"user_id": {"$in": muted_ids}},
+        {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1}
+    ).to_list(100)
+    
+    return muted
+
+@api_router.get("/users/me/restricted")
+async def get_restricted_users(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get current user's restricted list"""
+    current_user = await get_current_user(authorization, session_token)
+    
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "restricted_users": 1})
+    restricted_ids = user.get("restricted_users", [])
+    
+    if not restricted_ids:
+        return []
+    
+    restricted = await db.users.find(
+        {"user_id": {"$in": restricted_ids}},
+        {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1}
+    ).to_list(100)
+    
+    return restricted
+
 @api_router.get("/users/search/{query}")
 async def search_users(query: str):
     """Search users by name or username"""

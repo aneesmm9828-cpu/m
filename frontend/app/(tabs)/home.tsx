@@ -258,6 +258,9 @@ export default function HomeScreen() {
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/notifications')}>
             <Ionicons name="heart-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/create')}>
+            <Ionicons name="camera-outline" size={28} color={Colors.text} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/messages')}>
             <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
           </TouchableOpacity>

@@ -1,3 +1,4 @@
+import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
@@ -5,13 +6,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/colors';
 import { TouchTarget } from '../../constants/layout';
 
+// Tab icons defined outside component to avoid re-renders
+const HomeIcon = ({ color }) => <Ionicons name="home" size={26} color={color} />;
+const ExploreIcon = ({ color }) => <Ionicons name="search" size={26} color={color} />;
+const CreateIcon = ({ color }) => <Ionicons name="add-circle" size={32} color={color} />;
+const ReelsIcon = ({ color }) => <Ionicons name="play-circle" size={26} color={color} />;
+const MessagesIcon = ({ color }) => <Ionicons name="chatbubble" size={26} color={color} />;
+const ProfileIcon = ({ color }) => <Ionicons name="person" size={26} color={color} />;
+
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   
-  // Android-specific bottom padding to avoid system navigation
   const tabBarHeight = Platform.OS === 'ios' ? 60 : 65;
   const bottomPadding = Platform.OS === 'android' 
-    ? Math.max(insets.bottom, 8) + 8  // Extra 8px safety margin for Android
+    ? Math.max(insets.bottom, 8) + 8
     : insets.bottom || 8;
   
   return (
@@ -40,54 +48,12 @@ export default function TabsLayout() {
         },
       }}
     >
-      <Tabs.Screen
-        name="home"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={26} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={26} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="create"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle" size={32} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="reels"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="play-circle" size={26} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble" size={26} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={26} color={color} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="home" options={{ tabBarIcon: HomeIcon }} />
+      <Tabs.Screen name="explore" options={{ tabBarIcon: ExploreIcon }} />
+      <Tabs.Screen name="create" options={{ tabBarIcon: CreateIcon }} />
+      <Tabs.Screen name="reels" options={{ tabBarIcon: ReelsIcon }} />
+      <Tabs.Screen name="messages" options={{ tabBarIcon: MessagesIcon }} />
+      <Tabs.Screen name="profile" options={{ tabBarIcon: ProfileIcon }} />
     </Tabs>
   );
 }

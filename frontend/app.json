@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {APK u
+    "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"

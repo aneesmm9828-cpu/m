@@ -1,14 +1,38 @@
-// MARB App Color Theme
+// MARB App Color Theme - Instagram Style
 export const Colors = {
-  background: '#0f1419',
-  cardBackground: '#1a1f2e',
-  primary: '#00d9ff',
-  primaryGradientStart: '#00d9ff',
-  primaryGradientEnd: '#4fffb0',
+  // Instagram Dark Theme
+  background: '#000000',
+  cardBackground: '#121212',
+  surface: '#1c1c1c',
+  
+  // Primary Colors
+  primary: '#0095f6',  // Instagram Blue
+  primaryLight: '#1da1f2',
+  
+  // Gradient Colors (Instagram Story Ring)
+  gradientStart: '#f09433',
+  gradientMid1: '#e6683c',
+  gradientMid2: '#dc2743',
+  gradientMid3: '#cc2366',
+  gradientEnd: '#bc1888',
+  
+  // Text Colors
   text: '#ffffff',
-  textSecondary: '#a0a0a0',
-  border: '#2a2f3e',
-  error: '#ff4444',
-  success: '#4fffb0',
+  textSecondary: '#a8a8a8',
+  textTertiary: '#737373',
+  
+  // UI Colors
+  border: '#262626',
+  borderLight: '#363636',
+  divider: '#1c1c1c',
+  
+  // Status Colors
+  error: '#ed4956',
+  success: '#78d965',
+  warning: '#fdcb5c',
+  
+  // Like Color
+  like: '#ed4956',
+  
   transparent: 'transparent',
 };

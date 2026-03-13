@@ -9,7 +9,7 @@ Tests the specified endpoints:
 4. Explore posts - GET /api/posts/explore
 5. Search users - GET /api/users/search/test
 
-Backend URL: https://marb-reels.preview.emergentagent.com
+Backend URL: https://marb-stories.preview.emergentagent.com
 """
 
 import requests
@@ -241,7 +241,7 @@ class BackendTester:
 def main():
     """Main test function"""
     # Use the production URL from frontend .env
-    backend_url = "https://marb-reels.preview.emergentagent.com"
+    backend_url = "https://marb-stories.preview.emergentagent.com"
     
     print("MARB Social Media App - Backend API Testing")
     print(f"Target: {backend_url}")

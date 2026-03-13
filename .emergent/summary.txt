@@ -1,0 +1,193 @@
+<analysis>**original_problem_statement**: The user wants to build a complete, production-ready, Instagram-style social media mobile application for Android and iOS named MARB. The user has repeatedly requested deep research into Instagram's features and has asked for all of them to be implemented in the MARB app. This includes core functionalities like posts, stories, reels, and DMs, as well as more advanced features like story highlights, DM notes, detailed settings, explore page filters, and specific UI/UX behaviors. The user's ultimate goal is a 1:1 clone of Instagram's features and design.
+
+**PRODUCT REQUIREMENTS**:
+-   **Core Instagram Clone**: The app should replicate the features and user experience of Instagram as closely as possible.
+-   **Main Features**:
+    -   **Feed**: Scrollable posts, like/comment/share/save functionality, double-tap to like.
+    -   **Stories**: Creation, viewing, highlights.
+    -   **Reels**: Vertical video player, creation.
+    -   **Direct Messaging (DMs)**: Chat, notes.
+    -   **Profile**: User info, stats, tabs for posts/reels/tagged, saved posts, story highlights.
+    -   **Explore**: Content grid with search.
+    -   **Create**: A unified creation flow for Photos, Reels, and Stories.
+-   **User Interaction**: Follow/unfollow, block, mute, restrict users.
+-   **UI/UX**: The application's UI and UX must be identical to Instagram's.
+
+**User's preferred language**: The user's primary language is **Hindi**. The next agent MUST respond in Hindi.
+
+**what currently exists?**
+The project is a full-stack application using an Expo (React Native) frontend and a FastAPI/MongoDB backend.
+-   **Backend ()**: A monolithic server file containing all API endpoints and logic for users, posts, stories, reels, comments, likes, saves, and recently added features like Close Friends, Mute, Restrict, and Block lists. The database has been seeded with dummy data.
+-   **Frontend**: A large number of screens exist for all core features (Home, Profile, Reels, Explore, Create, DMs). The agent has recently implemented several key features requested by the user, including:
+    -   A camera icon in the header that opens a new Instagram-style create screen.
+    -   Navigation from a post's header to the user's profile page ().
+    -   Navigation from a post's image to a post detail page ().
+    -   New settings screens for Archived, Muted, and Blocked accounts.
+-   The previous critical UI instability seems to have been addressed, as a full test run by the testing agent reported that the UI loads and the backend passed all tests. However, the app is now in a state of major UI redesign based on the user's latest request.
+
+**Last working item**:
+-   Last item agent was working: The agent was implementing the user's request to make the entire app's UI/UX identical to Instagram (Ui ux me jo pej h istagram ki thr kar do). The agent began by fixing an issue in , restarting Expo, and was about to start redesigning the Home Feed ().
+-   Status: IN PROGRESS
+-   Agent Testing Done: N
+-   Which testing method agent to use? frontend testing agent (After redesigning a few key screens, the testing agent should be used to verify the UI and ensure no regressions occurred).
+-   User Testing Done: N
+
+**All Pending/In progress Issue list**:
+-   **Issue 1: Complete Instagram UI/UX Overhaul (P0)**: The user's latest and highest priority request is to redesign the entire application to match Instagram's look and feel. This is a massive task that has just been started.
+-   **Issue 2: End-to-End Feature Verification (P1)**: The agent recently implemented several critical navigation features (clicking on a user's profile, clicking on a post image). While the underlying code and APIs were created and tested in isolation, the full user flow has not been verified.
+
+**Issues Detail**:
+-   **Issue 1: Complete Instagram UI/UX Overhaul**
+    -   **Attempted fixes**: The agent fixed an error in  and was preparing to modify .
+    -   **Next debug checklist**:
+        1.  Systematically review each primary screen (, , , ).
+        2.  For each screen, compare it to the current Instagram app's UI.
+        3.  Update the styles (colors, fonts, spacing, icons) using a consistent theme, preferably with CSS variables or a theme provider for maintainability.
+        4.  Prioritize the  screen first, as it's the main user entry point.
+    -   **Why fix this issue and what will be achieved with the fix?** This directly addresses the user's latest explicit request and moves the app closer to the final goal of being an Instagram clone.
+    -   **Status:** IN PROGRESS
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** frontend
+    -   **Blocked on other issue:** None.
+
+-   **Issue 2: End-to-End Feature Verification**
+    -   **Attempted fixes**: The agent created the necessary files (, ), updated the backend (), and modified  to include  components. The backend API was tested with .
+    -   **Next debug checklist**:
+        1.  Run the app and manually perform the actions the user requested.
+        2.  Click on a user's name/profile picture in the feed and verify it navigates to their specific profile page and loads their data.
+        3.  Click on a post's image in the feed and verify it navigates to the post detail page.
+        4.  Click the new camera icon in the header and verify it opens the correct create screen.
+    -   **Why fix this issue and what will be achieved with the fix?** It ensures that recently completed work is fully functional from the user's perspective, builds trust, and prevents regressions.
+    -   **Status:** USER VERIFICATION PENDING
+    -   **Is recurring issue?** Y (The pattern of implementing features without full E2E testing has been a recurring problem).
+    -   **Should Test frontend/backend/both after fix?** frontend
+    -   **Blocked on other issue:** None.
+
+**In progress Task List**:
+-   **Task 1: Redesign Home Screen (P0)**
+    -   **Where to resume**: Modify  to match Instagram's current UI, including the header, story carousel, and post component styling.
+    -   **What will be achieved with this?** The first step in the major UI overhaul will be completed.
+    -   **Status:** IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?** frontend
+    -   **Blocked on something:** None.
+
+**Upcoming and Future Tasks**
+The user provided a comprehensive list of all Instagram features (). The next agent should use this as a reference for all future work.
+-   **Upcoming Tasks (P1):**
+    -   **Full UI Overhaul**: Continue the redesign for other key screens (, , , ).
+    -   **Advanced Story Features**: Implement Polls, Quizzes, Question stickers, and the Close Friends list functionality on the frontend.
+    -   **Advanced DM Features**: Implement Vanish Mode, Voice Messages, and Seen status indicators.
+    -   **Reels Creation**: Implement the full suite of Reel creation tools (trimming, speed control, AR filters, music).
+
+-   **Future Tasks (P2 - Major Modules):**
+    -   **Instagram Shop**: Implement product tagging, a dedicated shop tab, and wishlists.
+    -   **Creator/Business Tools**: Build the professional dashboard with analytics.
+    -   **Notifications**: Implement a full notification screen and push notifications.
+    -   **Settings**: Build out all remaining settings pages (2FA, Data Download, etc.).
+    -   **AI/Algorithm**: Implement feed ranking and content suggestion algorithms.
+
+**Completed work in this session**
+-   **Critical Stability Fixed**: Addressed the recurring UI instability. A full test run passed, with the backend at 100% and the frontend UI loading correctly.
+-   **New Features Implemented**:
+    -   Added a **Camera Icon** to the home header navigating to a new create screen.
+    -   Implemented **Profile Page Navigation**: Clicking a user in the feed now opens their dynamic profile page ().
+    -   Implemented **Post Detail Navigation**: Clicking a post image opens a detail page.
+    -   Added backend support and API endpoints for **Close Friends, Mute, Restrict, and Block** functionalities in .
+-   **New Screens Created**:
+    -   : Dynamic user profile page.
+    -   : Post detail page.
+    -   , , : New settings pages.
+-   **Testing & Verification**:
+    -   Successfully used the , which verified all backend APIs and confirmed the frontend UI was not crashing.
+    -   Manually tested the reel posting API via  and confirmed it works.
+-   **User Support**: Provided the user with instructions on how to download the project code.
+
+**Earlier issues found/mentioned but not fixed**
+-   The core issue of  being a monolith remains. The agent added more functionality to it, increasing its complexity. Refactoring this file into a proper project structure (, ) is a significant piece of technical debt.
+
+**Known issue recurrence from previous fork**
+-   **Issue recurrence in previous fork**: Non-functional core features. While the agent has been more diligent, the pattern of implementing features without performing a full end-to-end user-flow test persists. For example, the user had to explicitly ask for profile/post navigation to be functional after the agent had already worked on those areas.
+-   **Recurrence count**: 2+
+-   **Status**: IN PROGRESS (The agent is improving but still needs to be more thorough in self-testing).
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+-   **Frontend**: React Native, Expo, Expo Router (file-based routing, including dynamic routes like ), Zustand.
+-   **Backend**: FastAPI, MongoDB (), Pydantic, JWT.
+-   **Architecture**: Monorepo with  and  services.
+
+**key DB schema**
+-   **users**: , , , , ...,  (List),  (List),  (List),  (List).
+-   **posts**: , , , , , .
+-   **stories**: , , , , .
+
+**changes in tech stack**
+-   None.
+
+**All files of reference**
+-   : The primary screen to be redesigned. Contains new navigation logic.
+-   : The monolithic backend file, updated with new user-action and data-fetching endpoints.
+-   : The new dynamic profile page.
+-   : The new post detail page.
+-   : The redesigned creation screen.
+-    & : Files updated to support new settings pages.
+-   : The user's master list of requirements for future development.
+-   : The latest test report showing backend health.
+
+**Areas that need refactoring**:
+-   ****: This file is critically oversized. It should be broken down into a standard FastAPI project structure with separate folders for , , and  to ensure long-term maintainability.
+-   **Frontend Styling**: With the new request for a complete UI overhaul, this is an opportunity to create a centralized theme (e.g., a  file with colors, fonts, spacing) instead of using inline or ad-hoc styles in each component.
+
+**key api endpoints**
+-    (NEW)
+-    (NEW)
+-    (NEW)
+-    (NEW)
+-    (NEW)
+-    (Verified to be working)
+-   
+-   
+
+**Critical Info for New Agent**
+-   **RESPOND IN HINDI**: The user communicates exclusively in Hindi. All your responses must be in Hindi.
+-   **PRIORITY 1: UI/UX OVERHAUL**: Your top priority is to continue the UI redesign started by the previous agent. Begin with the Home screen () and then move to other key screens, making them look and feel like Instagram.
+-   **PRIORITY 2: VERIFY RECENT FEATURES**: Before starting new work, perform a quick manual test of the features just added: click a user's name on the feed, click a post image, and click the new camera icon. Ensure they work as the user expects.
+-   **USE THE MASTER LIST**: The user has provided a very detailed list of all required Instagram features in . Refer to this document for all future development planning to ensure you are aligned with the user's vision.
+-   **The app is more stable now.** The backend is solid (100% test pass), and the UI isn't crashing. You have a good foundation to build upon, but be careful not to reintroduce instability with the UI overhaul.
+
+**documents and test reports created in this job**
+-   
+-   
+-   
+
+**Last 10 User Messages and any pending HUMAN messages**
+10. **#149 **: Make the UI/UX pages like Instagram. (IN PROGRESS - This is the current P0 task).
+9.  **#147**: User provides a massive, detailed list of every Instagram feature. (COMPLETED - Agent has saved this as a reference file).
+8.  **#109 **: Request to add a camera icon next to the heart icon, and make profiles/posts clickable. (COMPLETED).
+7.  **#105**: User acknowledges the Reel API is working and asks to add more features from a screenshot. (COMPLETED).
+6.  **#84 **: Add this feature also... check why the reel is not being posted. (COMPLETED - Agent investigated and confirmed the Reel API works fine).
+5.  **#80 **: I want to download my project. (COMPLETED - Agent provided instructions).
+4.  **#78 **: Unclear request. Agent asked for clarification. (COMPLETED).
+3.  **#74**: User is seeing test results. (Context message).
+2.  **#6 **: Okay, do it and do deep research on Instagram and add all its features to my app until they are all the same. (IN PROGRESS - This is the overarching goal).
+1.  **#256  (from previous fork)**: What happened, did it get stuck? (RESOLVED - The app is no longer stuck).
+
+**Project Health Check:**
+-   **In-Progress/Refactoring**: The application is functionally stable (backend tests pass, UI loads), but it is undergoing a major, user-requested UI overhaul.
+
+**3rd Party Integrations**
+-   None configured.
+
+**Testing status**
+-   Testing agent used after significant changes: YES. The agent ran the testing agent, which passed all 32 backend tests and confirmed the frontend UI was loading without crashing.
+-   Troubleshoot agent used after agent stuck in loop: NO
+-   Test files created: None.
+-   Known regressions: None currently, but the major UI overhaul carries a high risk of introducing new ones.
+
+**Credentials to test flow:**
+-   The user can register a new account via the app's signup flow.  tests show signup is working.
+
+**What agent forgot to execute**
+-   The agent has not performed a full, end-to-end test of the newly added navigation features from a user's perspective. They tested the API and created the frontend code, but did not confirm the entire flow works with a manual click-through. This is a recurring pattern that needs to be broken.</analysis>

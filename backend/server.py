@@ -1771,7 +1771,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://marb-reels.preview.emergentagent.com",
+        "https://marb-stories.preview.emergentagent.com",
         "https://marb-reels.cluster-0.preview.emergentcf.cloud",
     ],
     allow_methods=["*"],

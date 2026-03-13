@@ -8,6 +8,8 @@ export const Colors = {
   // Primary Colors
   primary: '#0095f6',  // Instagram Blue
   primaryLight: '#1da1f2',
+  primaryGradientStart: '#0095f6',
+  primaryGradientEnd: '#00d4ff',
   
   // Gradient Colors (Instagram Story Ring)
   gradientStart: '#f09433',
@@ -15,6 +17,9 @@ export const Colors = {
   gradientMid2: '#dc2743',
   gradientMid3: '#cc2366',
   gradientEnd: '#bc1888',
+  
+  // Story gradient array
+  storyGradient: ['#f09433', '#e6683c', '#dc2743', '#cc2366', '#bc1888'] as string[],
   
   // Text Colors
   text: '#ffffff',
@@ -28,11 +33,18 @@ export const Colors = {
   
   // Status Colors
   error: '#ed4956',
-  success: '#78d965',
-  warning: '#fdcb5c',
+  success: '#00d26a',
+  warning: '#f5a623',
   
   // Like Color
   like: '#ed4956',
+  
+  // Live Color
+  live: '#ff3b5c',
+  
+  // Special colors
+  verified: '#0095f6',
+  gold: '#ffd700',
   
   transparent: 'transparent',
 };

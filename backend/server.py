@@ -1505,6 +1505,942 @@ async def health_check():
 async def root():
     return {"message": "MARB API is running", "version": "1.0"}
 
+# =============== FORGOT PASSWORD / OTP ===============
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(request: Request):
+    """Initiate forgot password flow - store OTP"""
+    body = await request.json()
+    email_or_username = body.get("email_or_username", "").lower().strip()
+    if not email_or_username:
+        raise HTTPException(status_code=400, detail="Email or username required")
+    user = await db.users.find_one({"$or": [{"email": email_or_username}, {"username": email_or_username}]}, {"_id": 0})
+    if not user:
+        # Don't reveal if user exists
+        return {"message": "If this account exists, an OTP has been sent"}
+    import random
+    otp = str(random.randint(100000, 999999))
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await db.password_reset_otps.delete_many({"user_id": user["user_id"]})
+    await db.password_reset_otps.insert_one({"user_id": user["user_id"], "otp": otp, "expires_at": expires_at.isoformat()})
+    # In production, send via SMS/Email. For now return OTP for testing
+    return {"message": "OTP sent", "otp": otp, "user_id": user["user_id"]}
+
+@api_router.post("/auth/verify-otp")
+async def verify_otp(request: Request):
+    """Verify OTP for password reset"""
+    body = await request.json()
+    user_id = body.get("user_id")
+    otp = body.get("otp")
+    if not user_id or not otp:
+        raise HTTPException(status_code=400, detail="user_id and otp required")
+    record = await db.password_reset_otps.find_one({"user_id": user_id, "otp": otp}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    expires_at = record["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="OTP expired")
+    reset_token = uuid.uuid4().hex
+    await db.password_reset_otps.update_one({"user_id": user_id, "otp": otp}, {"$set": {"reset_token": reset_token, "verified": True}})
+    return {"message": "OTP verified", "reset_token": reset_token}
+
+@api_router.post("/auth/reset-password")
+async def reset_password(request: Request):
+    """Reset password with reset token"""
+    body = await request.json()
+    user_id = body.get("user_id")
+    reset_token = body.get("reset_token")
+    new_password = body.get("new_password")
+    if not all([user_id, reset_token, new_password]):
+        raise HTTPException(status_code=400, detail="All fields required")
+    record = await db.password_reset_otps.find_one({"user_id": user_id, "reset_token": reset_token, "verified": True}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid reset token")
+    import bcrypt
+    hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    await db.users.update_one({"user_id": user_id}, {"$set": {"hashed_password": hashed}})
+    await db.password_reset_otps.delete_many({"user_id": user_id})
+    return {"message": "Password reset successful"}
+
+# =============== ONBOARDING ===============
+
+@api_router.get("/users/suggested")
+async def get_suggested_users(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get suggested users for onboarding"""
+    try:
+        current_user = await get_current_user(authorization, session_token)
+        following = current_user.followers or []
+        users = await db.users.find({"user_id": {"$ne": current_user.user_id, "$nin": following}}, {"_id": 0, "hashed_password": 0}).limit(20).to_list(20)
+        import random
+        random.shuffle(users)
+        return users[:10]
+    except:
+        users = await db.users.find({}, {"_id": 0, "hashed_password": 0}).limit(10).to_list(10)
+        return users
+
+@api_router.post("/users/onboarding/complete")
+async def complete_onboarding(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Mark onboarding as complete"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    interests = body.get("interests", [])
+    await db.users.update_one({"user_id": current_user.user_id}, {"$set": {"onboarding_complete": True, "interests": interests}})
+    return {"message": "Onboarding complete"}
+
+# =============== GROUP MESSAGES ===============
+
+@api_router.post("/messages/groups")
+async def create_group(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a group chat"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    name = body.get("name", "Group")
+    member_ids = body.get("member_ids", [])
+    if current_user.user_id not in member_ids:
+        member_ids.append(current_user.user_id)
+    group_id = f"group_{uuid.uuid4().hex[:12]}"
+    group = {
+        "group_id": group_id,
+        "name": name,
+        "admin_id": current_user.user_id,
+        "member_ids": member_ids,
+        "picture": body.get("picture"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_message": None
+    }
+    await db.groups.insert_one({**group, "_id": group_id})
+    group.pop("_id", None)
+    return group
+
+@api_router.get("/messages/groups")
+async def get_groups(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user's groups"""
+    current_user = await get_current_user(authorization, session_token)
+    groups = await db.groups.find({"member_ids": current_user.user_id}, {"_id": 0}).to_list(50)
+    result = []
+    for g in groups:
+        members = await db.users.find({"user_id": {"$in": g.get("member_ids", [])}}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1}).to_list(50)
+        g["members"] = members
+        result.append(g)
+    return result
+
+@api_router.get("/messages/groups/{group_id}")
+async def get_group_messages(group_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get group messages"""
+    current_user = await get_current_user(authorization, session_token)
+    messages = await db.group_messages.find({"group_id": group_id}, {"_id": 0}).sort("created_at", 1).to_list(100)
+    return messages
+
+@api_router.post("/messages/groups/{group_id}")
+async def send_group_message(group_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Send a message to group"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    msg = {
+        "message_id": f"gmsg_{uuid.uuid4().hex[:12]}",
+        "group_id": group_id,
+        "sender_id": current_user.user_id,
+        "sender_name": current_user.name,
+        "sender_username": current_user.username,
+        "text": body.get("text", ""),
+        "image": body.get("image"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.group_messages.insert_one({**msg})
+    await db.groups.update_one({"group_id": group_id}, {"$set": {"last_message": {"text": msg["text"], "created_at": msg["created_at"], "sender_name": current_user.name}}})
+    return msg
+
+# =============== STORY STICKERS ===============
+
+@api_router.post("/stories/{story_id}/poll-response")
+async def respond_to_poll(story_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Submit poll response"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    option = body.get("option", 0)
+    await db.story_polls.update_one({"story_id": story_id}, {"$push": {"responses": {"user_id": current_user.user_id, "option": option, "created_at": datetime.now(timezone.utc).isoformat()}}}, upsert=True)
+    return {"message": "Poll response submitted"}
+
+@api_router.post("/stories/{story_id}/qa-response")
+async def respond_to_qa(story_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Submit Q&A response"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    question = body.get("question", "")
+    await db.story_qa.update_one({"story_id": story_id}, {"$push": {"questions": {"user_id": current_user.user_id, "question": question, "is_anonymous": body.get("is_anonymous", False), "created_at": datetime.now(timezone.utc).isoformat()}}}, upsert=True)
+    return {"message": "Question submitted"}
+
+@api_router.get("/stories/{story_id}/poll-results")
+async def get_poll_results(story_id: str):
+    """Get poll results for a story"""
+    poll = await db.story_polls.find_one({"story_id": story_id}, {"_id": 0})
+    return poll or {"responses": []}
+
+# =============== CREATOR ANALYTICS ===============
+
+@api_router.get("/analytics/overview")
+async def get_analytics_overview(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get creator analytics overview"""
+    current_user = await get_current_user(authorization, session_token)
+    posts = await db.posts.find({"user_id": current_user.user_id}, {"_id": 0, "likes": 1, "comments": 1, "created_at": 1}).to_list(100)
+    reels = await db.reels.find({"user_id": current_user.user_id}, {"_id": 0, "likes": 1, "comments": 1, "views": 1, "created_at": 1}).to_list(100)
+    total_likes = sum(len(p.get("likes", [])) for p in posts) + sum(len(r.get("likes", [])) for r in reels)
+    total_comments = sum(len(p.get("comments", [])) for p in posts) + sum(len(r.get("comments", [])) for r in reels)
+    followers_count = len(current_user.followers) if current_user.followers else 0
+    return {
+        "followers": followers_count,
+        "following": len(current_user.following) if current_user.following else 0,
+        "total_posts": len(posts),
+        "total_reels": len(reels),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "reach": followers_count * 3,
+        "impressions": total_likes * 5 + total_comments * 10,
+        "profile_visits": followers_count * 2,
+        "follower_growth": [{"date": f"Day {i+1}", "count": max(0, followers_count - (7 - i) * 2)} for i in range(7)]
+    }
+
+@api_router.get("/analytics/content")
+async def get_content_analytics(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get top performing content"""
+    current_user = await get_current_user(authorization, session_token)
+    posts = await db.posts.find({"user_id": current_user.user_id}, {"_id": 0, "post_id": 1, "caption": 1, "likes": 1, "comments": 1, "created_at": 1}).to_list(50)
+    posts_sorted = sorted(posts, key=lambda x: len(x.get("likes", [])), reverse=True)[:5]
+    reels = await db.reels.find({"user_id": current_user.user_id}, {"_id": 0, "reel_id": 1, "caption": 1, "likes": 1, "comments": 1, "created_at": 1}).to_list(50)
+    reels_sorted = sorted(reels, key=lambda x: len(x.get("likes", [])), reverse=True)[:5]
+    return {"top_posts": posts_sorted, "top_reels": reels_sorted}
+
+@api_router.get("/analytics/audience")
+async def get_audience_analytics(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get audience analytics"""
+    current_user = await get_current_user(authorization, session_token)
+    followers_count = len(current_user.followers) if current_user.followers else 0
+    return {
+        "total_followers": followers_count,
+        "gender_split": {"male": 55, "female": 42, "other": 3},
+        "age_groups": [{"group": "13-17", "pct": 8}, {"group": "18-24", "pct": 35}, {"group": "25-34", "pct": 32}, {"group": "35-44", "pct": 16}, {"group": "45+", "pct": 9}],
+        "top_locations": [{"city": "Mumbai", "pct": 22}, {"city": "Delhi", "pct": 18}, {"city": "Bangalore", "pct": 15}, {"city": "Hyderabad", "pct": 10}, {"city": "Chennai", "pct": 8}],
+        "active_hours": [{"hour": h, "activity": 30 + (40 if 8 <= h <= 22 else 0) + (20 if 18 <= h <= 21 else 0)} for h in range(24)]
+    }
+
+# =============== EVENTS ===============
+
+@api_router.post("/events")
+async def create_event(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create an event"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    event = {
+        "event_id": f"event_{uuid.uuid4().hex[:12]}",
+        "creator_id": current_user.user_id,
+        "title": body.get("title", ""),
+        "description": body.get("description", ""),
+        "date": body.get("date", ""),
+        "time": body.get("time", ""),
+        "location": body.get("location", ""),
+        "category": body.get("category", ""),
+        "cover_image": body.get("cover_image"),
+        "going": [current_user.user_id],
+        "interested": [],
+        "not_going": [],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.events.insert_one({**event, "_id": event["event_id"]})
+    event.pop("_id", None)
+    return event
+
+@api_router.get("/events")
+async def get_events(skip: int = 0, limit: int = 20):
+    """Get events list"""
+    events = await db.events.find({}, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    result = []
+    for e in events:
+        creator = await db.users.find_one({"user_id": e["creator_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        e["creator"] = creator
+        result.append(e)
+    return result
+
+@api_router.get("/events/{event_id}")
+async def get_event(event_id: str):
+    """Get event details"""
+    event = await db.events.find_one({"event_id": event_id}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    creator = await db.users.find_one({"user_id": event["creator_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+    event["creator"] = creator
+    return event
+
+@api_router.post("/events/{event_id}/rsvp")
+async def rsvp_event(event_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """RSVP to event"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    status = body.get("status", "going")  # going, interested, not_going
+    await db.events.update_one({"event_id": event_id}, {"$pull": {"going": current_user.user_id, "interested": current_user.user_id, "not_going": current_user.user_id}})
+    field = status if status in ["going", "interested", "not_going"] else "interested"
+    await db.events.update_one({"event_id": event_id}, {"$push": {field: current_user.user_id}})
+    return {"message": f"RSVP status: {status}"}
+
+# =============== STUDY ROOMS ===============
+
+@api_router.get("/study-rooms")
+async def get_study_rooms():
+    """Get active study rooms"""
+    rooms = await db.study_rooms.find({}, {"_id": 0}).to_list(20)
+    if not rooms:
+        # Seed default rooms
+        default_rooms = [
+            {"room_id": "room_1", "name": "JEE Prep 2026", "subject": "Mathematics", "members": [], "max_members": 10, "timer": "25:00", "is_active": True},
+            {"room_id": "room_2", "name": "UPSC Study Circle", "subject": "General Studies", "members": [], "max_members": 8, "timer": "25:00", "is_active": True},
+            {"room_id": "room_3", "name": "Code & Debug", "subject": "Programming", "members": [], "max_members": 12, "timer": "25:00", "is_active": True},
+            {"room_id": "room_4", "name": "CA Exam Prep", "subject": "Accountancy", "members": [], "max_members": 6, "timer": "25:00", "is_active": True},
+        ]
+        await db.study_rooms.insert_many([{**r, "_id": r["room_id"]} for r in default_rooms])
+        rooms = default_rooms
+    return rooms
+
+@api_router.post("/study-rooms/{room_id}/join")
+async def join_study_room(room_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Join a study room"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.study_rooms.update_one({"room_id": room_id}, {"$addToSet": {"members": current_user.user_id}})
+    return {"message": "Joined study room"}
+
+@api_router.post("/study-rooms/{room_id}/leave")
+async def leave_study_room(room_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Leave a study room"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.study_rooms.update_one({"room_id": room_id}, {"$pull": {"members": current_user.user_id}})
+    return {"message": "Left study room"}
+
+# =============== BROADCAST CHANNELS ===============
+
+@api_router.post("/broadcast-channels")
+async def create_broadcast_channel(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a broadcast channel"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    channel = {
+        "channel_id": f"chan_{uuid.uuid4().hex[:12]}",
+        "creator_id": current_user.user_id,
+        "name": body.get("name", ""),
+        "description": body.get("description", ""),
+        "picture": body.get("picture"),
+        "subscribers": [current_user.user_id],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.broadcast_channels.insert_one({**channel, "_id": channel["channel_id"]})
+    channel.pop("_id", None)
+    return channel
+
+@api_router.get("/broadcast-channels")
+async def get_broadcast_channels(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get broadcast channels"""
+    try:
+        current_user = await get_current_user(authorization, session_token)
+        channels = await db.broadcast_channels.find({}, {"_id": 0}).to_list(20)
+    except:
+        channels = await db.broadcast_channels.find({}, {"_id": 0}).to_list(20)
+    return channels
+
+@api_router.post("/broadcast-channels/{channel_id}/subscribe")
+async def subscribe_channel(channel_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Subscribe to a broadcast channel"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.broadcast_channels.update_one({"channel_id": channel_id}, {"$addToSet": {"subscribers": current_user.user_id}})
+    return {"message": "Subscribed"}
+
+@api_router.post("/broadcast-channels/{channel_id}/messages")
+async def send_broadcast_message(channel_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Send broadcast message"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    msg = {
+        "message_id": f"bmsg_{uuid.uuid4().hex[:12]}",
+        "channel_id": channel_id,
+        "sender_id": current_user.user_id,
+        "text": body.get("text", ""),
+        "image": body.get("image"),
+        "reactions": {},
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.broadcast_messages.insert_one({**msg})
+    return msg
+
+@api_router.get("/broadcast-channels/{channel_id}/messages")
+async def get_broadcast_messages(channel_id: str):
+    """Get broadcast messages"""
+    messages = await db.broadcast_messages.find({"channel_id": channel_id}, {"_id": 0}).sort("created_at", 1).to_list(100)
+    return messages
+
+# =============== MARB COINS / REWARDS ===============
+
+@api_router.get("/rewards/balance")
+async def get_rewards_balance(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get MARB coins balance"""
+    current_user = await get_current_user(authorization, session_token)
+    wallet = await db.wallets.find_one({"user_id": current_user.user_id}, {"_id": 0})
+    if not wallet:
+        wallet = {"user_id": current_user.user_id, "coins": 100, "transactions": []}
+    return wallet
+
+@api_router.post("/rewards/earn")
+async def earn_coins(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Earn MARB coins"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    coins = body.get("coins", 10)
+    reason = body.get("reason", "Activity")
+    await db.wallets.update_one({"user_id": current_user.user_id}, {"$inc": {"coins": coins}, "$push": {"transactions": {"type": "earn", "amount": coins, "reason": reason, "created_at": datetime.now(timezone.utc).isoformat()}}}, upsert=True)
+    return {"message": f"Earned {coins} coins!", "coins": coins}
+
+# =============== SHOPPING / MARKETPLACE ===============
+
+@api_router.get("/shop/products")
+async def get_products(category: Optional[str] = None, skip: int = 0, limit: int = 20):
+    """Get shop products"""
+    query = {} if not category else {"category": category}
+    products = await db.products.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    return products
+
+@api_router.post("/shop/products")
+async def create_product(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a product listing"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    product = {
+        "product_id": f"prod_{uuid.uuid4().hex[:12]}",
+        "seller_id": current_user.user_id,
+        "title": body.get("title", ""),
+        "description": body.get("description", ""),
+        "price": body.get("price", 0),
+        "images": body.get("images", []),
+        "category": body.get("category", ""),
+        "stock": body.get("stock", 1),
+        "ratings": [],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.products.insert_one({**product, "_id": product["product_id"]})
+    product.pop("_id", None)
+    return product
+
+@api_router.get("/shop/products/{product_id}")
+async def get_product(product_id: str):
+    """Get product details"""
+    product = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    seller = await db.users.find_one({"user_id": product["seller_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+    product["seller"] = seller
+    return product
+
+@api_router.post("/shop/wishlist/{product_id}")
+async def add_to_wishlist(product_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Add product to wishlist"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.users.update_one({"user_id": current_user.user_id}, {"$addToSet": {"wishlist": product_id}})
+    return {"message": "Added to wishlist"}
+
+@api_router.get("/shop/wishlist")
+async def get_wishlist(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user wishlist"""
+    current_user = await get_current_user(authorization, session_token)
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "wishlist": 1})
+    wishlist = user.get("wishlist", []) if user else []
+    products = await db.products.find({"product_id": {"$in": wishlist}}, {"_id": 0}).to_list(50)
+    return products
+
+# =============== LIVE STREAMING ===============
+
+@api_router.post("/live/start")
+async def start_live(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Start a live stream"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    live = {
+        "live_id": f"live_{uuid.uuid4().hex[:12]}",
+        "host_id": current_user.user_id,
+        "title": body.get("title", f"{current_user.name}'s Live"),
+        "audience": body.get("audience", "everyone"),
+        "viewers": [],
+        "comments": [],
+        "hearts": 0,
+        "is_active": True,
+        "started_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.live_streams.insert_one({**live, "_id": live["live_id"]})
+    live.pop("_id", None)
+    return live
+
+@api_router.get("/live")
+async def get_active_lives():
+    """Get active live streams"""
+    lives = await db.live_streams.find({"is_active": True}, {"_id": 0}).to_list(20)
+    result = []
+    for l in lives:
+        host = await db.users.find_one({"user_id": l["host_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        l["host"] = host
+        result.append(l)
+    return result
+
+@api_router.post("/live/{live_id}/end")
+async def end_live(live_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """End a live stream"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.live_streams.update_one({"live_id": live_id, "host_id": current_user.user_id}, {"$set": {"is_active": False, "ended_at": datetime.now(timezone.utc).isoformat()}})
+    return {"message": "Live ended"}
+
+@api_router.post("/live/{live_id}/comment")
+async def comment_on_live(live_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Comment on live stream"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    comment = {"user_id": current_user.user_id, "name": current_user.name, "text": body.get("text", ""), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.live_streams.update_one({"live_id": live_id}, {"$push": {"comments": comment}})
+    return {"message": "Comment added"}
+
+# =============== HASHTAG / LOCATION PAGES ===============
+
+@api_router.get("/hashtags/{tag}/posts")
+async def get_hashtag_posts(tag: str, skip: int = 0, limit: int = 30):
+    """Get posts for a hashtag"""
+    posts = await db.posts.find({"caption": {"$regex": f"#{tag}", "$options": "i"}}, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    result = []
+    for p in posts:
+        user = await db.users.find_one({"user_id": p["user_id"]}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1})
+        p["user"] = user
+        result.append(p)
+    return result
+
+@api_router.get("/locations/{location}/posts")
+async def get_location_posts(location: str, skip: int = 0, limit: int = 30):
+    """Get posts for a location"""
+    posts = await db.posts.find({"location": {"$regex": location, "$options": "i"}}, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    return posts
+
+# =============== ADMIN PANEL ===============
+
+ADMIN_SECRET = "marb_admin_2026"
+
+@api_router.get("/admin/users")
+async def admin_get_users(secret: str, skip: int = 0, limit: int = 50):
+    """Admin: Get all users"""
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    users = await db.users.find({}, {"_id": 0, "hashed_password": 0}).skip(skip).limit(limit).to_list(limit)
+    return {"users": users, "total": await db.users.count_documents({})}
+
+@api_router.post("/admin/users/{user_id}/ban")
+async def admin_ban_user(user_id: str, secret: str):
+    """Admin: Ban a user"""
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"is_banned": True}})
+    return {"message": "User banned"}
+
+@api_router.get("/admin/analytics")
+async def admin_analytics(secret: str):
+    """Admin: Platform analytics"""
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    total_users = await db.users.count_documents({})
+    total_posts = await db.posts.count_documents({})
+    total_reels = await db.reels.count_documents({})
+    total_stories = await db.stories.count_documents({})
+    total_messages = await db.messages.count_documents({})
+    return {"total_users": total_users, "total_posts": total_posts, "total_reels": total_reels, "total_stories": total_stories, "total_messages": total_messages, "dau": total_users // 3, "weekly_active": total_users // 2}
+
+@api_router.get("/admin/reports")
+async def admin_get_reports(secret: str):
+    """Admin: Get reported content"""
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    reports = await db.reports.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return reports
+
+# =============== REPORTS / SAFETY ===============
+
+@api_router.post("/report")
+async def report_content(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Report content"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    report = {
+        "report_id": f"rep_{uuid.uuid4().hex[:12]}",
+        "reporter_id": current_user.user_id,
+        "content_type": body.get("content_type", "post"),
+        "content_id": body.get("content_id", ""),
+        "reason": body.get("reason", ""),
+        "description": body.get("description", ""),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.reports.insert_one({**report})
+    return {"message": "Report submitted. Thank you for keeping MARB safe."}
+
+# =============== REFERRALS ===============
+
+@api_router.get("/referrals/my-code")
+async def get_referral_code(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user's referral code"""
+    current_user = await get_current_user(authorization, session_token)
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "referral_code": 1})
+    if not user or not user.get("referral_code"):
+        code = f"MARB{current_user.user_id[-6:].upper()}"
+        await db.users.update_one({"user_id": current_user.user_id}, {"$set": {"referral_code": code}})
+    else:
+        code = user["referral_code"]
+    referred = await db.users.count_documents({"referred_by": code})
+    return {"referral_code": code, "referred_count": referred, "coins_earned": referred * 50}
+
+# =============== FOLLOWERS MANAGEMENT ===============
+
+@api_router.get("/users/me/followers")
+async def get_my_followers(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get current user's followers"""
+    current_user = await get_current_user(authorization, session_token)
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "followers": 1})
+    follower_ids = user_doc.get("followers", []) if user_doc else []
+    followers = await db.users.find({"user_id": {"$in": follower_ids}}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1, "bio": 1}).to_list(100)
+    return followers
+
+@api_router.get("/users/me/following")
+async def get_my_following(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get users current user is following"""
+    current_user = await get_current_user(authorization, session_token)
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "following": 1})
+    following_ids = user_doc.get("following", []) if user_doc else []
+    following = await db.users.find({"user_id": {"$in": following_ids}}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1, "bio": 1}).to_list(100)
+    return following
+
+@api_router.delete("/users/{user_id}/followers")
+async def remove_follower(user_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Remove a follower"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.users.update_one({"user_id": current_user.user_id}, {"$pull": {"followers": user_id}})
+    await db.users.update_one({"user_id": user_id}, {"$pull": {"following": current_user.user_id}})
+    return {"message": "Follower removed"}
+
+# =============== NOTIFICATIONS SETTINGS ===============
+
+@api_router.put("/settings/notifications")
+async def update_notification_settings(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Update notification settings"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    await db.users.update_one({"user_id": current_user.user_id}, {"$set": {"notification_settings": body}})
+    return {"message": "Settings updated"}
+
+@api_router.get("/settings/notifications")
+async def get_notification_settings(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get notification settings"""
+    current_user = await get_current_user(authorization, session_token)
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "notification_settings": 1})
+    return user.get("notification_settings", {"likes": True, "comments": True, "follows": True, "messages": True, "stories": True, "reels": True}) if user else {}
+
+# =============== MOOD FEED ===============
+
+@api_router.post("/mood")
+async def set_mood(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Set user mood for mood-based feed"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    mood = body.get("mood", "happy")
+    await db.users.update_one({"user_id": current_user.user_id}, {"$set": {"current_mood": mood, "mood_updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"message": f"Mood set to {mood}"}
+
+@api_router.get("/mood/feed")
+async def get_mood_feed(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get mood-based feed"""
+    current_user = await get_current_user(authorization, session_token)
+    user = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "current_mood": 1})
+    mood = user.get("current_mood", "happy") if user else "happy"
+    mood_hashtags = {"happy": "#happy #fun #joy", "sad": "#motivation #inspiration", "excited": "#adventure #travel", "peaceful": "#nature #calm #meditation", "energetic": "#fitness #workout"}
+    posts = await db.posts.find({}, {"_id": 0}).limit(20).to_list(20)
+    return {"mood": mood, "posts": posts[:10]}
+
+# =============== SCHEDULED POSTS ===============
+
+@api_router.post("/posts/schedule")
+async def schedule_post(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Schedule a post for later"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    scheduled = {
+        "scheduled_id": f"sched_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "image": body.get("image", ""),
+        "caption": body.get("caption", ""),
+        "scheduled_for": body.get("scheduled_for", ""),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.scheduled_posts.insert_one({**scheduled})
+    return scheduled
+
+@api_router.get("/posts/scheduled")
+async def get_scheduled_posts(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get scheduled posts"""
+    current_user = await get_current_user(authorization, session_token)
+    posts = await db.scheduled_posts.find({"user_id": current_user.user_id, "status": "pending"}, {"_id": 0}).sort("scheduled_for", 1).to_list(50)
+    return posts
+
+# =============== TIME CAPSULE ===============
+
+@api_router.post("/time-capsule")
+async def create_time_capsule(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a time capsule post"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    capsule = {
+        "capsule_id": f"cap_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "image": body.get("image", ""),
+        "caption": body.get("caption", ""),
+        "reveal_date": body.get("reveal_date", ""),
+        "is_revealed": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.time_capsules.insert_one({**capsule})
+    return capsule
+
+@api_router.get("/time-capsule")
+async def get_time_capsules(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user's time capsules"""
+    current_user = await get_current_user(authorization, session_token)
+    capsules = await db.time_capsules.find({"user_id": current_user.user_id}, {"_id": 0}).to_list(20)
+    return capsules
+
+# =============== FUNDRAISER ===============
+
+@api_router.post("/fundraisers")
+async def create_fundraiser(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a fundraiser"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    fundraiser = {
+        "fundraiser_id": f"fund_{uuid.uuid4().hex[:12]}",
+        "creator_id": current_user.user_id,
+        "title": body.get("title", ""),
+        "description": body.get("description", ""),
+        "goal_amount": body.get("goal_amount", 0),
+        "raised_amount": 0,
+        "donors": [],
+        "image": body.get("image"),
+        "end_date": body.get("end_date", ""),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.fundraisers.insert_one({**fundraiser, "_id": fundraiser["fundraiser_id"]})
+    fundraiser.pop("_id", None)
+    return fundraiser
+
+@api_router.get("/fundraisers")
+async def get_fundraisers():
+    """Get active fundraisers"""
+    fundraisers = await db.fundraisers.find({}, {"_id": 0}).to_list(20)
+    return fundraisers
+
+# =============== VERIFICATION APPLICATION ===============
+
+@api_router.post("/verification/apply")
+async def apply_for_verification(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Apply for account verification"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    application = {
+        "application_id": f"ver_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "category": body.get("category", ""),
+        "known_as": body.get("known_as", ""),
+        "country": body.get("country", "India"),
+        "id_type": body.get("id_type", ""),
+        "id_number": body.get("id_number", ""),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.verifications.insert_one({**application})
+    return {"message": "Verification application submitted", "application_id": application["application_id"]}
+
+# =============== BIRTHDAYS ===============
+
+@api_router.get("/birthdays")
+async def get_friend_birthdays(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get friends' birthdays"""
+    current_user = await get_current_user(authorization, session_token)
+    user_doc = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "following": 1})
+    following_ids = user_doc.get("following", []) if user_doc else []
+    friends_with_birthday = await db.users.find({"user_id": {"$in": following_ids}, "dob": {"$exists": True}}, {"_id": 0, "user_id": 1, "name": 1, "username": 1, "picture": 1, "dob": 1}).to_list(50)
+    return friends_with_birthday
+
+# =============== STREAKS ===============
+
+@api_router.get("/streaks")
+async def get_streaks(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user streaks"""
+    current_user = await get_current_user(authorization, session_token)
+    streaks = await db.streaks.find({"$or": [{"user1_id": current_user.user_id}, {"user2_id": current_user.user_id}]}, {"_id": 0}).to_list(20)
+    return streaks
+
+@api_router.post("/streaks/{friend_id}/maintain")
+async def maintain_streak(friend_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Maintain a streak with a friend"""
+    current_user = await get_current_user(authorization, session_token)
+    streak = await db.streaks.find_one({"$or": [{"user1_id": current_user.user_id, "user2_id": friend_id}, {"user1_id": friend_id, "user2_id": current_user.user_id}]}, {"_id": 0})
+    if streak:
+        await db.streaks.update_one({"streak_id": streak["streak_id"]}, {"$inc": {"days": 1}, "$set": {"last_maintained": datetime.now(timezone.utc).isoformat()}})
+    else:
+        new_streak = {"streak_id": f"str_{uuid.uuid4().hex[:12]}", "user1_id": current_user.user_id, "user2_id": friend_id, "days": 1, "last_maintained": datetime.now(timezone.utc).isoformat(), "started_at": datetime.now(timezone.utc).isoformat()}
+        await db.streaks.insert_one({**new_streak})
+    return {"message": "Streak maintained!"}
+
+# =============== POST REACTIONS ===============
+
+@api_router.post("/posts/{post_id}/react")
+async def react_to_post(post_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """React to a post with emoji"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    reaction = body.get("reaction", "like")  # like, love, haha, wow, sad, angry, care
+    await db.post_reactions.update_one({"post_id": post_id, "user_id": current_user.user_id}, {"$set": {"reaction": reaction, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return {"message": f"Reacted with {reaction}"}
+
+@api_router.get("/posts/{post_id}/reactions")
+async def get_post_reactions(post_id: str):
+    """Get all reactions for a post"""
+    reactions = await db.post_reactions.find({"post_id": post_id}, {"_id": 0}).to_list(100)
+    counts = {}
+    for r in reactions:
+        counts[r["reaction"]] = counts.get(r["reaction"], 0) + 1
+    return {"reactions": counts, "total": len(reactions)}
+
+# =============== CHECK-IN ===============
+
+@api_router.post("/check-in")
+async def check_in(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Check in at a location"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    checkin = {
+        "checkin_id": f"ci_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "location": body.get("location", ""),
+        "latitude": body.get("latitude"),
+        "longitude": body.get("longitude"),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.checkins.insert_one({**checkin})
+    return checkin
+
+@api_router.get("/check-in/history")
+async def get_checkin_history(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get check-in history"""
+    current_user = await get_current_user(authorization, session_token)
+    checkins = await db.checkins.find({"user_id": current_user.user_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return checkins
+
+# =============== TRENDING ===============
+
+@api_router.get("/trending")
+async def get_trending():
+    """Get trending topics"""
+    trending_tags = ["#Bollywood", "#Cricket", "#India", "#Fashion", "#Food", "#Travel", "#Tech", "#Music", "#Fitness", "#Startup"]
+    trending_locations = ["Mumbai", "Delhi", "Bangalore", "Hyderabad", "Chennai", "Kolkata", "Pune", "Jaipur"]
+    return {"trending_tags": trending_tags, "trending_locations": trending_locations, "trending_audio": ["Tum Hi Ho", "Ek Do Teen", "Kesariya", "Raataan Lambiyan", "Pasoori"]}
+
+# =============== SAVED COLLECTIONS ===============
+
+@api_router.post("/collections")
+async def create_collection(request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a saved collection"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    collection = {
+        "collection_id": f"col_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "name": body.get("name", "Collection"),
+        "post_ids": [],
+        "cover_image": None,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.collections.insert_one({**collection})
+    return collection
+
+@api_router.get("/collections")
+async def get_collections(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get user's collections"""
+    current_user = await get_current_user(authorization, session_token)
+    cols = await db.collections.find({"user_id": current_user.user_id}, {"_id": 0}).to_list(20)
+    return cols
+
+@api_router.post("/collections/{collection_id}/add")
+async def add_to_collection(collection_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Add post to collection"""
+    current_user = await get_current_user(authorization, session_token)
+    body = await request.json()
+    post_id = body.get("post_id")
+    await db.collections.update_one({"collection_id": collection_id, "user_id": current_user.user_id}, {"$addToSet": {"post_ids": post_id}})
+    return {"message": "Added to collection"}
+
+# =============== PINNED POSTS ===============
+
+@api_router.post("/posts/{post_id}/pin")
+async def pin_post(post_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Pin a post to profile"""
+    current_user = await get_current_user(authorization, session_token)
+    pinned = await db.users.find_one({"user_id": current_user.user_id}, {"_id": 0, "pinned_posts": 1})
+    if pinned and len(pinned.get("pinned_posts", [])) >= 3:
+        raise HTTPException(status_code=400, detail="Maximum 3 posts can be pinned")
+    await db.users.update_one({"user_id": current_user.user_id}, {"$addToSet": {"pinned_posts": post_id}})
+    return {"message": "Post pinned"}
+
+@api_router.post("/posts/{post_id}/unpin")
+async def unpin_post(post_id: str, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Unpin a post from profile"""
+    current_user = await get_current_user(authorization, session_token)
+    await db.users.update_one({"user_id": current_user.user_id}, {"$pull": {"pinned_posts": post_id}})
+    return {"message": "Post unpinned"}
+
+# =============== REELS REMIX ===============
+
+@api_router.post("/reels/{reel_id}/remix")
+async def remix_reel(reel_id: str, request: Request, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Create a remix of a reel"""
+    current_user = await get_current_user(authorization, session_token)
+    original = await db.reels.find_one({"reel_id": reel_id}, {"_id": 0})
+    if not original:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    body = await request.json()
+    remix = {
+        "reel_id": f"reel_{uuid.uuid4().hex[:12]}",
+        "user_id": current_user.user_id,
+        "video": body.get("video", original.get("video", "")),
+        "caption": body.get("caption", f"Remix of @{original.get('user', {}).get('username', '')}"),
+        "original_reel_id": reel_id,
+        "is_remix": True,
+        "likes": [],
+        "comments": [],
+        "views": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.reels.insert_one({**remix})
+    remix.pop("_id", None)
+    return remix
+
+# =============== MEMORIES / FLASHBACK ===============
+
+@api_router.get("/memories")
+async def get_memories(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
+    """Get On This Day memories"""
+    current_user = await get_current_user(authorization, session_token)
+    today = datetime.now(timezone.utc)
+    last_year = today - timedelta(days=365)
+    posts = await db.posts.find({"user_id": current_user.user_id, "created_at": {"$gte": last_year.isoformat(), "$lte": (last_year + timedelta(days=3)).isoformat()}}, {"_id": 0}).to_list(10)
+    return {"date": last_year.strftime("%B %d, %Y"), "memories": posts}
+
 # =============== DATABASE SEED ENDPOINT ===============
 
 import random

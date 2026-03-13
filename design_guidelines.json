@@ -1,0 +1,327 @@
+{
+  "identity": {
+    "name": "MARB",
+    "description": "A high-fidelity social media experience focusing on visual storytelling and community connection for the Indian market.",
+    "archetype": "Electric Noir",
+    "principles": [
+      "Content is King: UI recedes, content shines.",
+      "Fluid Motion: Interactions feel physical and responsive.",
+      "Vibrant Identity: Use gradients to evoke energy and celebration.",
+      "Accessible by Default: High contrast text and clear touch targets."
+    ]
+  },
+  "theme": {
+    "mode": "dark",
+    "colors": {
+      "background": {
+        "default": "#000000",
+        "paper": "#121212",
+        "subtle": "#1A1A1A",
+        "modal": "#262626"
+      },
+      "text": {
+        "primary": "#FFFFFF",
+        "secondary": "#A8A8A8",
+        "tertiary": "#666666",
+        "inverse": "#000000",
+        "brand": "#0095F6"
+      },
+      "brand": {
+        "primary": "#0095F6",
+        "primary_pressed": "#007ACC",
+        "gradient_start": "#F09433",
+        "gradient_mid1": "#E6683C",
+        "gradient_mid2": "#DC2743",
+        "gradient_mid3": "#CC2366",
+        "gradient_end": "#BC1888"
+      },
+      "status": {
+        "success": "#00D26A",
+        "error": "#ED4956",
+        "warning": "#F5A623",
+        "info": "#0095F6"
+      },
+      "border": {
+        "default": "#262626",
+        "active": "#FFFFFF",
+        "focus": "#0095F6"
+      },
+      "overlay": {
+        "default": "rgba(0, 0, 0, 0.7)",
+        "light": "rgba(255, 255, 255, 0.1)"
+      }
+    },
+    "gradients": {
+      "instagram": ["#F09433", "#E6683C", "#DC2743", "#CC2366", "#BC1888"],
+      "marb_special": ["#0095F6", "#BC1888", "#F09433"],
+      "dark_fade": ["transparent", "rgba(0,0,0,0.8)"]
+    }
+  },
+  "typography": {
+    "font_families": {
+      "heading": "Outfit",
+      "body": "Inter",
+      "monospace": "Space Mono"
+    },
+    "scale": {
+      "xs": { "size": 11, "lineHeight": 14, "letterSpacing": 0.2 },
+      "sm": { "size": 13, "lineHeight": 18, "letterSpacing": 0 },
+      "base": { "size": 15, "lineHeight": 20, "letterSpacing": -0.1 },
+      "lg": { "size": 17, "lineHeight": 22, "letterSpacing": -0.2 },
+      "xl": { "size": 20, "lineHeight": 24, "letterSpacing": -0.3 },
+      "2xl": { "size": 24, "lineHeight": 28, "letterSpacing": -0.4 },
+      "3xl": { "size": 32, "lineHeight": 36, "letterSpacing": -0.6 }
+    },
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700"
+    }
+  },
+  "spacing": {
+    "scale": [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64],
+    "layout": {
+      "page_padding": 16,
+      "card_padding": 12,
+      "element_spacing": 8,
+      "section_spacing": 24
+    }
+  },
+  "layout": {
+    "radius": {
+      "sm": 4,
+      "md": 8,
+      "lg": 12,
+      "xl": 20,
+      "full": 9999
+    },
+    "icon_size": {
+      "sm": 16,
+      "md": 24,
+      "lg": 32,
+      "xl": 48
+    }
+  },
+  "components": {
+    "Button": {
+      "primary": {
+        "backgroundColor": "#0095F6",
+        "borderRadius": 8,
+        "height": 44,
+        "paddingHorizontal": 16,
+        "justifyContent": "center",
+        "alignItems": "center"
+      },
+      "secondary": {
+        "backgroundColor": "#262626",
+        "borderRadius": 8,
+        "height": 44,
+        "paddingHorizontal": 16,
+        "justifyContent": "center",
+        "alignItems": "center"
+      },
+      "outline": {
+        "backgroundColor": "transparent",
+        "borderWidth": 1,
+        "borderColor": "#262626",
+        "borderRadius": 8,
+        "height": 44
+      },
+      "text_style": {
+        "color": "#FFFFFF",
+        "fontWeight": "600",
+        "fontSize": 15
+      }
+    },
+    "Input": {
+      "default": {
+        "backgroundColor": "#262626",
+        "borderRadius": 8,
+        "height": 44,
+        "paddingHorizontal": 12,
+        "color": "#FFFFFF",
+        "fontSize": 15
+      },
+      "search": {
+        "backgroundColor": "#262626",
+        "borderRadius": 12,
+        "height": 36,
+        "paddingHorizontal": 12,
+        "flexDirection": "row",
+        "alignItems": "center"
+      }
+    },
+    "Avatar": {
+      "sm": { "width": 32, "height": 32, "borderRadius": 16 },
+      "md": { "width": 44, "height": 44, "borderRadius": 22 },
+      "lg": { "width": 80, "height": 80, "borderRadius": 40 },
+      "xl": { "width": 96, "height": 96, "borderRadius": 48 },
+      "border": {
+        "gradient": true,
+        "width": 2.5,
+        "padding": 2
+      }
+    }
+  },
+  "icons": {
+    "library": "Ionicons",
+    "active_style": "filled",
+    "inactive_style": "outline",
+    "mapping": {
+      "home": "home",
+      "search": "search",
+      "reels": "film",
+      "shop": "bag-handle",
+      "profile": "person-circle",
+      "like": "heart",
+      "comment": "chatbubble",
+      "share": "paper-plane",
+      "save": "bookmark",
+      "more": "ellipsis-horizontal",
+      "back": "chevron-back",
+      "close": "close",
+      "add": "add-circle",
+      "settings": "settings-sharp",
+      "camera": "camera",
+      "mic": "mic",
+      "sticker": "happy"
+    }
+  },
+  "animations": {
+    "library": "react-native-reanimated",
+    "presets": {
+      "press": {
+        "scale_down": 0.96,
+        "duration": 100
+      },
+      "screen_transition": {
+        "type": "slide_from_right",
+        "duration": 300
+      },
+      "like_heart": {
+        "type": "spring",
+        "damping": 15,
+        "stiffness": 150
+      }
+    }
+  },
+  "sections": {
+    "1_Auth": {
+      "layout": "stack",
+      "key_elements": ["Branded Gradient Logo", "Minimal Inputs", "Social Login Buttons"],
+      "notes": "Use gradient text for 'MARB' logo. Login button should be full width primary color."
+    },
+    "2_Home_Feed": {
+      "layout": "tabs",
+      "key_elements": ["Stories Rail (Top)", "Infinite Scroll Feed", "Header Icons (Logo Left, Actions Right)"],
+      "notes": "Stories need gradient border. Posts take full width. Action buttons (Like/Comment/Share) left aligned."
+    },
+    "3_Post_Management": {
+      "layout": "modal",
+      "key_elements": ["Media Gallery Grid", "Crop Tool", "Filter Carousel", "Caption Input"],
+      "notes": "Dark mode gallery. Selected image highlights with primary border."
+    },
+    "4_Reels": {
+      "layout": "tabs",
+      "key_elements": ["Fullscreen Video", "Right Side Actions", "Bottom Info Overlay"],
+      "notes": "Transparent tab bar background. White text with shadow for legibility over video."
+    },
+    "5_Explore": {
+      "layout": "tabs",
+      "key_elements": ["Search Bar (Sticky)", "Masonry Grid (1:1 and 1:2 items)"],
+      "notes": "Auto-playing videos in grid (muted). Search bar turns into full search page on tap."
+    },
+    "6_DMs": {
+      "layout": "stack",
+      "key_elements": ["User List with Active Status", "Chat Window", "Message Input"],
+      "notes": "Sent messages: Primary Gradient bg. Received: #262626 bg. 'Notes' bubbles at top of list."
+    },
+    "7_Profile": {
+      "layout": "tabs",
+      "key_elements": ["Avatar + Stats Row", "Bio Section", "Highlights Rail", "Content Tabs (Grid, Reels, Tagged)"],
+      "notes": "Sticky tab headers. Grid items 3-column with 1px gap."
+    },
+    "8_Notifications": {
+      "layout": "stack",
+      "key_elements": ["Grouped Activities", "Follow/Following Button States"],
+      "notes": "New notifications highlighted with subtle blue bg tint (#1A232E)."
+    },
+    "9_Story_Stickers": {
+      "layout": "modal_overlay",
+      "key_elements": ["Draggable Widgets", "Search Stickers", "Recent/Trending"],
+      "notes": "Glassmorphism background for sticker sheet."
+    },
+    "10_Live_Streaming": {
+      "layout": "fullscreen",
+      "key_elements": ["Camera View", "Comments Overlay (Bottom Left)", "Viewer Count (Top)"],
+      "notes": "Heart floating animation on right side."
+    },
+    "11_Shopping": {
+      "layout": "stack",
+      "key_elements": ["Product Grid", "Wishlist", "Checkout Flow"],
+      "notes": "Clean white price tags on images. 'Add to Bag' button persistent."
+    },
+    "12_Creator_Tools": {
+      "layout": "stack",
+      "key_elements": ["Insights Dashboard", "Monetization Status", "Ad Tools"],
+      "notes": "Use simple bar charts with primary color gradients. Dark cards for data."
+    },
+    "13_MARB_Unique": {
+      "layout": "stack",
+      "key_elements": ["Karma Points Badge", "Super Like Animation", "Local Trends Map"],
+      "notes": "Gamification elements. Use gold/yellow for Karma points."
+    },
+    "14_Settings": {
+      "layout": "stack",
+      "key_elements": ["Grouped Lists", "Search Settings", "Toggle Switches"],
+      "notes": "Standard list item height 48px. Toggles use brand color when active."
+    },
+    "15_Safety": {
+      "layout": "stack",
+      "key_elements": ["Block List", "Keyword Filters", "Report Forms"],
+      "notes": "Red text for block/restrict actions."
+    },
+    "16_Social": {
+      "layout": "stack",
+      "key_elements": ["Discover People", "Contact Sync", "Invite Friends"],
+      "notes": "Card based user suggestions with 'Follow' button."
+    },
+    "17_Business": {
+      "layout": "stack",
+      "key_elements": ["Professional Dashboard", "Ad Creation", "Branded Content"],
+      "notes": "Professional tone. Use more slate grays."
+    },
+    "18_Accessibility": {
+      "layout": "stack",
+      "key_elements": ["Font Size Slider", "High Contrast Toggle", "Caption Settings"],
+      "notes": "Preview window for changes."
+    },
+    "19_Extras": {
+      "layout": "stack",
+      "key_elements": ["QR Code Card", "Saved Collections", "Archive"],
+      "notes": "Custom gradient background for QR card."
+    },
+    "20_Admin_Panel": {
+      "layout": "stack",
+      "key_elements": ["User Management Table", "Content Moderation Queue", "System Health"],
+      "notes": "Dense layout. Status badges (Green/Red/Yellow)."
+    }
+  },
+  "technical_constraints": {
+    "box_shadow": "Use 'boxShadow' style prop instead of deprecated 'shadow*' props (shadowColor, shadowOffset, etc) for web compatibility if needed, or standard RN shadows for native.",
+    "video": "Use 'expo-video' instead of deprecated 'expo-av'.",
+    "image": "Use 'expo-image' for all images for caching and performance.",
+    "icons": "Use '@expo/vector-icons/Ionicons'."
+  },
+  "universal_guidelines": [
+    "Use 'data-testid' on all interactive elements (buttons, inputs, list items).",
+    "Avoid generic 'View' wrappers; use semantic names where possible in code comments.",
+    "Do not use platform-specific primitives (like iOS DatePicker) if a cross-platform custom UI offers better consistency.",
+    "Images in feed should default to 1:1 or 4:5 aspect ratio.",
+    "Touch targets must be at least 44x44 points.",
+    "Text must meet AA contrast ratio (4.5:1) against background.",
+    "Use Skeleton loaders instead of spinning circles for content loading."
+  ],
+  "instructions_to_main_agent": "You are building the React Native Expo app. Follow the 'sections' guide to implement the 181 pages. Use Expo Router for navigation (app directory). Use 'react-native-reanimated' for animations. Use 'expo-image' for optimized image loading. Stick to the color palette rigidly. NOTE: 'shadow*' props are deprecated in recent Expo/RN versions, prefer using 'elevation' for Android and 'shadow*' for iOS but be aware of 'boxShadow' unification."
+}

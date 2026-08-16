@@ -1,38 +1,40 @@
-// MARB App Color Theme - Instagram Style
+// MARB App Color Theme - Premium Odisha Style
 export const Colors = {
-  // Instagram Dark Theme
+  // Dark Theme Base
   background: '#000000',
-  cardBackground: '#121212',
-  surface: '#1c1c1c',
+  cardBackground: '#0d0d0d',
+  surface: '#151515',
   
-  // Primary Colors
-  primary: '#0095f6',  // Instagram Blue
-  primaryLight: '#1da1f2',
+  // Primary MARB Colors (Odisha Cyan/Mint)
+  primary: '#00d9ff',
+  primaryLight: '#00ffcc',
+  primaryGradientStart: '#00d9ff',
+  primaryGradientEnd: '#00ffcc',
   
-  // Gradient Colors (Instagram Story Ring)
-  gradientStart: '#f09433',
-  gradientMid1: '#e6683c',
-  gradientMid2: '#dc2743',
-  gradientMid3: '#cc2366',
-  gradientEnd: '#bc1888',
+  // Story/Highlight Gradients
+  gradientStart: '#00d9ff',
+  gradientMid1: '#00ffcc',
+  gradientMid2: '#4fffb0',
+  gradientMid3: '#00ffcc',
+  gradientEnd: '#00d9ff',
   
   // Text Colors
   text: '#ffffff',
-  textSecondary: '#a8a8a8',
-  textTertiary: '#737373',
+  textSecondary: '#888888',
+  textTertiary: '#555555',
   
   // UI Colors
-  border: '#262626',
-  borderLight: '#363636',
-  divider: '#1c1c1c',
+  border: '#1a1a1a',
+  borderLight: '#2a2a2a',
+  divider: '#1a1a1a',
   
   // Status Colors
-  error: '#ed4956',
-  success: '#78d965',
-  warning: '#fdcb5c',
+  error: '#ff3b5c',
+  success: '#4fffb0',
+  warning: '#ff8501',
   
   // Like Color
-  like: '#ed4956',
+  like: '#ff3b5c',
   
   transparent: 'transparent',
 };

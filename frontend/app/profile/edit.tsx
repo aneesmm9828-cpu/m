@@ -10,69 +10,129 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
+import { supabase } from '../../utils/supabaseConfig';
+import { uploadMedia } from '../../utils/supabaseHelpers';
 import { useAuthStore } from '../../store/authStore';
+import { useUIStore } from '../../store/uiStore';
+import { Switch } from 'react-native';
 
 export default function EditProfileScreen() {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
+  const { showPopup, updateProgress } = useUIStore();
   const [name, setName] = useState(user?.name || '');
   const [username, setUsername] = useState(user?.username || '');
   const [bio, setBio] = useState(user?.bio || '');
-  const [pronouns, setPronouns] = useState(user?.pronouns || '');
-  const [gender, setGender] = useState(user?.gender || '');
   const [link, setLink] = useState(user?.link || '');
   const [profilePic, setProfilePic] = useState(user?.picture || '');
+  const [isPrivate, setIsPrivate] = useState(user?.is_private || false);
+  const [musicTitle, setMusicTitle] = useState(user?.profile_music_name || 'Add music to your profile');
   const [loading, setLoading] = useState(false);
 
   const handleSelectImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera roll permission is required');
-      return;
-    }
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera roll permission is required to change your profile picture.');
+        return;
+      }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-      base64: true,
-    });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+        base64: true,
+      });
 
-    if (!result.canceled && result.assets[0].base64) {
-      const base64Image = result.assets[0].base64;
-      setProfilePic(`data:image/jpeg;base64,${base64Image}`);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        if (asset.base64) {
+          setProfilePic(`data:image/jpeg;base64,${asset.base64}`);
+        } else if (asset.uri) {
+          setProfilePic(asset.uri);
+        }
+      }
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to open image picker');
     }
   };
 
   const handleSave = async () => {
+    if (!user || !supabase) return;
+
     setLoading(true);
+    showPopup('upload', 'Updating profile...', 10);
     try {
-      const response = await api.put('/users/profile', {
+      let finalPicUrl = profilePic;
+
+      if (profilePic.startsWith('data:')) {
+        console.log('🔄 Uploading new profile picture...');
+        showPopup('upload', 'Uploading profile picture...', 30);
+        try {
+          finalPicUrl = await uploadMedia('media', `profiles/${user.user_id}/profile_${Date.now()}.jpg`, profilePic);
+          if (!finalPicUrl) throw new Error('UPLOAD_FAILED');
+        } catch (uploadErr: any) {
+          if (uploadErr.message === 'STORAGE_BUCKET_MISSING') {
+            showPopup('error', 'Storage bucket "media" is missing');
+            Alert.alert(
+              'Storage Error',
+              'The "media" bucket is missing in your Supabase project. Please create a public bucket named "media" in your Supabase dashboard.',
+              [{ text: 'OK' }]
+            );
+            setLoading(false);
+            return;
+          }
+          throw uploadErr;
+        }
+      }
+
+      console.log('💾 Updating profile in database with URL:', finalPicUrl);
+      updateProgress(70);
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: name,
+          username: username,
+          bio: bio,
+          avatar_url: finalPicUrl,
+          is_private: isPrivate,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.user_id);
+
+      if (error) throw error;
+
+      // Update both 'picture' and 'avatar_url' in the store to ensure consistency
+      const updatedUser = {
+        ...user,
         name,
         username,
         bio,
-        picture: profilePic,
-        pronouns,
-        gender,
-        link,
-      });
+        picture: finalPicUrl,
+        avatar_url: finalPicUrl,
+        profilePicUrl: finalPicUrl,
+        is_private: isPrivate
+      };
 
-      if (response.data) {
-        setUser(response.data);
-        Alert.alert('Success', 'Profile updated successfully!');
-        router.back();
-      }
+      setUser(updatedUser);
+
+      updateProgress(100);
+      showPopup('success', 'Profile updated successfully!');
+      // Navigate back and force a refresh of the previous screen if possible
+      router.back();
     } catch (error: any) {
       console.error('Update error:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to update profile');
+      showPopup('error', 'Failed to update profile');
+      Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -80,130 +140,62 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        {/* Header */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={28} color={Colors.text} />
+            <Ionicons name="close" size={28} color={Colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit profile</Text>
           <TouchableOpacity onPress={handleSave} disabled={loading}>
-            <Ionicons name="checkmark" size={28} color={Colors.primary} />
+            {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Ionicons name="checkmark" size={28} color={Colors.primary} />}
           </TouchableOpacity>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Profile Picture */}
           <View style={styles.profilePicSection}>
             <TouchableOpacity onPress={handleSelectImage}>
               <Image
-                source={{
-                  uri: profilePic
-                    ? profilePic.startsWith('data:')
-                      ? profilePic
-                      : `data:image/jpeg;base64,${profilePic}`
-                    : 'https://via.placeholder.com/150',
-                }}
+                key={profilePic} // Add key to force image refresh when URL changes
+                source={{ uri: profilePic || 'https://via.placeholder.com/150' }}
                 style={styles.profilePic}
               />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleSelectImage}>
-              <Text style={styles.editPicText}>Edit picture or avatar</Text>
+              <Text style={styles.editPicText}>Edit picture</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Form Fields */}
           <View style={styles.formSection}>
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Name</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Name"
-                placeholderTextColor={Colors.textSecondary}
-              />
+              <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={Colors.textSecondary} />
             </View>
-
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Username</Text>
-              <TextInput
-                style={styles.input}
-                value={username}
-                onChangeText={setUsername}
-                placeholder="Username"
-                placeholderTextColor={Colors.textSecondary}
-                autoCapitalize="none"
-              />
+              <TextInput style={styles.input} value={username} onChangeText={setUsername} autoCapitalize="none" placeholder="Username" placeholderTextColor={Colors.textSecondary} />
             </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Pronouns</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Add pronouns"
-                placeholderTextColor={Colors.textSecondary}
-                value={pronouns}
-                onChangeText={setPronouns}
-              />
-            </View>
-
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Bio</Text>
-              <TextInput
-                style={[styles.input, styles.bioInput]}
-                value={bio}
-                onChangeText={setBio}
-                placeholder="Bio"
-                placeholderTextColor={Colors.textSecondary}
-                multiline
-                maxLength={150}
-              />
+              <TextInput style={[styles.input, { height: 80 }]} value={bio} onChangeText={setBio} multiline placeholder="Bio" placeholderTextColor={Colors.textSecondary} />
             </View>
 
-            {/* Additional Options */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Link</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Add link"
-                placeholderTextColor={Colors.textSecondary}
-                value={link}
-                onChangeText={setLink}
-                autoCapitalize="none"
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Gender</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Prefer not to say"
-                placeholderTextColor={Colors.textSecondary}
-                value={gender}
-                onChangeText={setGender}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.musicOption}>
-              <Text style={styles.label}>Music</Text>
-              <View style={styles.musicRight}>
-                <Text style={styles.musicPlaceholder}>Add music to your profile</Text>
-                <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+            <TouchableOpacity style={styles.settingRow} onPress={() => router.push('/profile/music')}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Profile Music</Text>
+                <Text style={styles.settingSub}>{musicTitle}</Text>
               </View>
+              <Ionicons name="musical-notes" size={20} color={Colors.primary} />
             </TouchableOpacity>
 
-            {/* Switch Options */}
-            <TouchableOpacity style={styles.linkOption}>
-              <Text style={styles.linkText}>Switch to professional account</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.linkOption}>
-              <Text style={styles.linkText}>Personal information settings</Text>
-            </TouchableOpacity>
+            <View style={styles.settingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Private Account</Text>
+                <Text style={styles.settingSub}>Only people you approve can see your photos and videos.</Text>
+              </View>
+              <Switch
+                value={isPrivate}
+                onValueChange={setIsPrivate}
+                trackColor={{ false: '#333', true: Colors.primary }}
+              />
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -212,101 +204,17 @@ export default function EditProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  profilePicSection: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  profilePic: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 12,
-  },
-  editPicText: {
-    fontSize: 15,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  formSection: {
-    paddingHorizontal: 16,
-  },
-  inputContainer: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: Colors.cardBackground,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  bioInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  optionButton: {
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  optionText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  musicOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  musicRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  musicPlaceholder: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  linkOption: {
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  linkText: {
-    fontSize: 16,
-    color: Colors.primary,
-    fontWeight: '500',
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: Colors.text },
+  profilePicSection: { alignItems: 'center', paddingVertical: 24 },
+  profilePic: { width: 100, height: 100, borderRadius: 50, marginBottom: 12 },
+  editPicText: { fontSize: 15, color: Colors.primary, fontWeight: '600', textAlign: 'center' },
+  formSection: { paddingHorizontal: 16 },
+  inputContainer: { marginBottom: 16 },
+  label: { fontSize: 14, color: Colors.textSecondary, marginBottom: 8 },
+  input: { backgroundColor: Colors.cardBackground, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: Colors.text, borderWidth: 1, borderColor: Colors.border },
+  settingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderTopWidth: 1, borderTopColor: Colors.border },
+  settingLabel: { fontSize: 15, color: Colors.text, fontWeight: '500' },
+  settingSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2, paddingRight: 40 },
 });

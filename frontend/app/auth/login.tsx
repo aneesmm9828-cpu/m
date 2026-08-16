@@ -11,43 +11,88 @@ import {
   ActivityIndicator,
   Image,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/colors';
 import { TouchTarget, Spacing } from '../../constants/layout';
-import { api } from '../../utils/api';
+import { supabase } from '../../utils/supabaseConfig';
 import { useAuthStore } from '../../store/authStore';
+import { Ionicons } from '@expo/vector-icons';
+
+const { width } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { setUser, setIsAuthenticated } = useAuthStore();
-  const [username, setUsername] = useState('');
+  const { setIsAuthenticated } = useAuthStore();
+
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!username || !password) {
-      Alert.alert('Error', 'Please enter username and password');
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter email and password');
       return;
+    }
+
+    if (!supabase) {
+        Alert.alert('Error', 'Supabase is not initialized');
+        return;
     }
 
     setLoading(true);
     try {
-      const response = await api.post('/auth/login', {
-        username: username.toLowerCase(),
-        password,
+      console.log('Attempting login for:', email.toLowerCase().trim());
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password: password,
       });
 
-      if (response.data.user) {
-        setUser(response.data.user);
-        setIsAuthenticated(true);
-        router.replace('/(tabs)/home');
+      if (error) {
+        console.error('Login error from Supabase:', error.message);
+        throw error;
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Invalid username or password');
+
+      console.log('Login successful, Session:', !!data.session);
+
+      if (data.session) {
+        setIsAuthenticated(true);
+        // Add a small delay to allow store update if needed
+        setTimeout(() => {
+          router.replace('/(tabs)/home');
+        }, 100);
+      } else {
+        throw new Error('No session created');
+      }
+
+    } catch (error: any) {
+      console.error('Login failed', error);
+      Alert.alert('Login Failed', error.message || 'Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: 'google' | 'facebook') => {
+    if (!supabase) return;
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: 'frontend://home', // Replace with your deep link scheme
+        },
+      });
+
+      if (error) throw error;
+      // In native apps, this usually opens a browser
+    } catch (error: any) {
+      console.error(`${provider} login failed`, error);
+      Alert.alert('Login Failed', error.message);
     } finally {
       setLoading(false);
     }
@@ -63,7 +108,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -73,27 +118,27 @@ export default function LoginScreen() {
             style={styles.gradient}
           >
             {/* Logo */}
-            <View style={styles.logoContainer}>
+            <View style={{ alignItems: 'center', marginBottom: 40 }}>
               <Image
                 source={require('../../assets/images/marb-logo.jpg')}
-                style={styles.logo}
+                style={{ width: 100, height: 100, borderRadius: 25, marginBottom: Spacing.lg }}
                 resizeMode="contain"
               />
               <Text style={styles.appName}>MARB</Text>
               <Text style={styles.tagline}>Create · Share · Go Viral</Text>
             </View>
 
-            {/* Login Form */}
             <View style={styles.formContainer}>
               <Text style={styles.title}>Log in</Text>
 
               <TextInput
                 style={styles.input}
-                placeholder="Username"
+                placeholder="Email"
                 placeholderTextColor={Colors.textSecondary}
-                value={username}
-                onChangeText={setUsername}
+                value={email}
+                onChangeText={setEmail}
                 autoCapitalize="none"
+                keyboardType="email-address"
                 autoCorrect={false}
               />
 
@@ -114,7 +159,7 @@ export default function LoginScreen() {
                 activeOpacity={0.8}
               >
                 <LinearGradient
-                  colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+                  colors={[Colors.primary, Colors.primaryLight]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
@@ -127,12 +172,38 @@ export default function LoginScreen() {
                 </LinearGradient>
               </TouchableOpacity>
 
-              <View style={styles.signupContainer}>
-                <Text style={styles.signupText}>Don't have an account?</Text>
-                <TouchableOpacity onPress={goToSignup} style={styles.signupTouchable}>
-                  <Text style={styles.signupLink}>Sign up</Text>
+              <View style={styles.dividerContainer}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <View style={styles.socialButtonsRow}>
+                <TouchableOpacity
+                  style={styles.socialButton}
+                  onPress={() => handleSocialLogin('google')}
+                  disabled={loading}
+                >
+                  <Ionicons name="logo-google" size={24} color="#EA4335" />
+                  <Text style={styles.socialButtonText}>Google</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.socialButton}
+                  onPress={() => handleSocialLogin('facebook')}
+                  disabled={loading}
+                >
+                  <Ionicons name="logo-facebook" size={24} color="#1877F2" />
+                  <Text style={styles.socialButtonText}>Facebook</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+
+            <View style={styles.signupContainer}>
+              <Text style={styles.signupText}>Don't have an account?</Text>
+              <TouchableOpacity onPress={goToSignup} style={styles.signupTouchable}>
+                <Text style={styles.signupLink}>Sign up</Text>
+              </TouchableOpacity>
             </View>
           </LinearGradient>
         </ScrollView>
@@ -157,16 +228,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.xl,
   },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    borderRadius: 25,
-    marginBottom: Spacing.lg,
-  },
   appName: {
     fontSize: 42,
     fontWeight: 'bold',
@@ -184,7 +245,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: Colors.text,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.sm,
     textAlign: 'center',
   },
   input: {
@@ -201,7 +262,7 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     marginTop: Spacing.sm,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
     minHeight: TouchTarget.comfortable,
   },
   buttonGradient: {
@@ -215,6 +276,44 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: Colors.background,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerText: {
+    color: Colors.textSecondary,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  socialButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 15,
+  },
+  socialButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cardBackground,
+    borderRadius: 12,
+    height: 50,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 10,
+  },
+  socialButtonText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
   signupContainer: {
     flexDirection: 'row',

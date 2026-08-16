@@ -17,8 +17,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
+import { useUIStore } from '../../store/uiStore';
+import { uploadMedia, createStory } from '../../utils/supabaseHelpers';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -39,7 +40,8 @@ export default function StoryCreateScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
-  
+  const { showPopup, hidePopup, updateProgress } = useUIStore();
+
   const [image, setImage] = useState(params.image || null);
   const [mediaType, setMediaType] = useState(params.mediaType || 'image');
   const [showStickers, setShowStickers] = useState(false);
@@ -49,26 +51,26 @@ export default function StoryCreateScreen() {
   const [textColor, setTextColor] = useState('#ffffff');
   const [textSize, setTextSize] = useState(24);
   const [isUploading, setIsUploading] = useState(false);
-  
+
   // Sticker States
   const [showPollModal, setShowPollModal] = useState(false);
   const [showQuestionModal, setShowQuestionModal] = useState(false);
   const [showMentionModal, setShowMentionModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
-  
+
   // Poll State
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['Yes', 'No']);
   const [activePoll, setActivePoll] = useState(null);
-  
+
   // Question State
   const [questionText, setQuestionText] = useState('Ask me anything');
   const [activeQuestion, setActiveQuestion] = useState(null);
-  
+
   // Mention State
   const [mentionUser, setMentionUser] = useState('');
   const [activeMention, setActiveMention] = useState(null);
-  
+
   // Location State
   const [locationText, setLocationText] = useState('');
   const [activeLocation, setActiveLocation] = useState(null);
@@ -76,7 +78,7 @@ export default function StoryCreateScreen() {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera roll permission is required');
+      Alert.alert('Permission needed', 'Gallery permission is required');
       return;
     }
 
@@ -117,7 +119,7 @@ export default function StoryCreateScreen() {
 
   const handleStickerSelect = (stickerId) => {
     setShowStickers(false);
-    
+
     switch (stickerId) {
       case 'mention':
         setShowMentionModal(true);
@@ -196,16 +198,30 @@ export default function StoryCreateScreen() {
   };
 
   const uploadStory = async () => {
-    if (!image) {
+    if (!image || !user) {
       Alert.alert('Error', 'Please select an image or video');
       return;
     }
 
     setIsUploading(true);
-    
+    showPopup('upload', 'Uploading to Story...', 10);
+
     try {
+      const filename = `stories/${user.user_id}/story_${Date.now()}.jpg`;
+
+      // 1. Upload to Supabase Storage
+      const publicUrl = await uploadMedia('media', filename, image);
+
+      if (!publicUrl) {
+          throw new Error('STORAGE_UPLOAD_FAILED');
+      }
+
+      updateProgress(60);
+      showPopup('upload', 'Finalizing story...', 60);
+
+      // 2. Create Database Record
       const storyData = {
-        image: image,
+        mediaUrl: publicUrl,
         media_type: mediaType,
         text_overlay: textOverlay || null,
         poll: activePoll || null,
@@ -213,13 +229,21 @@ export default function StoryCreateScreen() {
         mention: activeMention || null,
         location: activeLocation || null,
       };
-      
-      await api.post('/stories', storyData);
-      Alert.alert('Success', 'Story uploaded!');
+
+      const result = await createStory(user.user_id, storyData);
+
+      if (!result) throw new Error('DB_INSERT_FAILED');
+
+      updateProgress(100);
+      showPopup('success', 'Story shared successfully!');
       router.back();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading story:', error);
-      Alert.alert('Error', 'Failed to upload story');
+      if (error.message === 'STORAGE_BUCKET_MISSING') {
+          showPopup('error', 'Storage bucket "media" missing');
+      } else {
+          showPopup('error', 'Failed to upload story');
+      }
     } finally {
       setIsUploading(false);
     }
@@ -249,7 +273,7 @@ export default function StoryCreateScreen() {
             </LinearGradient>
             <Text style={styles.pickerText}>Camera</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.pickerOption} onPress={pickImage}>
             <LinearGradient
               colors={['#ff6b35', '#ff3b5c']}
@@ -332,7 +356,7 @@ export default function StoryCreateScreen() {
         <TouchableOpacity onPress={() => setImage(null)}>
           <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
-        
+
         <View style={styles.topActions}>
           <TouchableOpacity style={styles.topButton} onPress={() => setShowTextInput(true)}>
             <Ionicons name="text" size={24} color="#fff" />
@@ -345,7 +369,7 @@ export default function StoryCreateScreen() {
 
       {/* Bottom Controls */}
       <View style={styles.bottomControls}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.uploadButton}
           onPress={uploadStory}
           disabled={isUploading}
@@ -377,7 +401,7 @@ export default function StoryCreateScreen() {
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.stickersGrid}>
               {STICKER_TYPES.map((sticker) => (
                 <TouchableOpacity
@@ -403,12 +427,12 @@ export default function StoryCreateScreen() {
         transparent={true}
         onRequestClose={() => setShowTextInput(false)}
       >
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.textInputModal}
         >
           <TouchableOpacity style={styles.textInputOverlay} onPress={() => setShowTextInput(false)} />
-          
+
           <View style={styles.textInputContainer}>
             <TextInput
               style={[styles.textInputField, { color: textColor, fontSize: textSize }]}
@@ -419,7 +443,7 @@ export default function StoryCreateScreen() {
               multiline
               autoFocus
             />
-            
+
             <View style={styles.textColorPicker}>
               {TEXT_COLORS.map((color) => (
                 <TouchableOpacity
@@ -433,8 +457,8 @@ export default function StoryCreateScreen() {
                 />
               ))}
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.textDoneButton}
               onPress={() => setShowTextInput(false)}
             >
@@ -459,7 +483,7 @@ export default function StoryCreateScreen() {
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <TextInput
               style={styles.stickerInput}
               placeholder="Ask a question..."
@@ -467,7 +491,7 @@ export default function StoryCreateScreen() {
               value={pollQuestion}
               onChangeText={setPollQuestion}
             />
-            
+
             {pollOptions.map((opt, idx) => (
               <TextInput
                 key={idx}
@@ -482,9 +506,9 @@ export default function StoryCreateScreen() {
                 }}
               />
             ))}
-            
+
             {pollOptions.length < 4 && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.addOptionButton}
                 onPress={() => setPollOptions([...pollOptions, ''])}
               >
@@ -492,7 +516,7 @@ export default function StoryCreateScreen() {
                 <Text style={styles.addOptionText}>Add option</Text>
               </TouchableOpacity>
             )}
-            
+
             <TouchableOpacity style={styles.stickerSubmitButton} onPress={addPoll}>
               <Text style={styles.stickerSubmitText}>Add Poll</Text>
             </TouchableOpacity>
@@ -515,7 +539,7 @@ export default function StoryCreateScreen() {
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <TextInput
               style={styles.stickerInput}
               placeholder="Ask me anything"
@@ -523,7 +547,7 @@ export default function StoryCreateScreen() {
               value={questionText}
               onChangeText={setQuestionText}
             />
-            
+
             <TouchableOpacity style={styles.stickerSubmitButton} onPress={addQuestion}>
               <Text style={styles.stickerSubmitText}>Add Question</Text>
             </TouchableOpacity>
@@ -546,7 +570,7 @@ export default function StoryCreateScreen() {
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <TextInput
               style={styles.stickerInput}
               placeholder="@username"
@@ -555,7 +579,7 @@ export default function StoryCreateScreen() {
               onChangeText={setMentionUser}
               autoCapitalize="none"
             />
-            
+
             <TouchableOpacity style={styles.stickerSubmitButton} onPress={addMention}>
               <Text style={styles.stickerSubmitText}>Add Mention</Text>
             </TouchableOpacity>
@@ -578,7 +602,7 @@ export default function StoryCreateScreen() {
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <TextInput
               style={styles.stickerInput}
               placeholder="Search location..."
@@ -586,7 +610,7 @@ export default function StoryCreateScreen() {
               value={locationText}
               onChangeText={setLocationText}
             />
-            
+
             <TouchableOpacity style={styles.stickerSubmitButton} onPress={addLocation}>
               <Text style={styles.stickerSubmitText}>Add Location</Text>
             </TouchableOpacity>

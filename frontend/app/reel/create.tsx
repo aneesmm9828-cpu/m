@@ -17,12 +17,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
+import { uploadMedia, createReel } from '../../utils/supabaseHelpers';
+import { useAuthStore } from '../../store/authStore';
+import { useUIStore } from '../../store/uiStore';
+import { validateReelDimensions } from '../../utils/video-validation';
 
 const { width, height } = Dimensions.get('window');
 
 export default function ReelCreateScreen() {
   const router = useRouter();
+  const { user } = useAuthStore();
+  const { showPopup, hidePopup, updateProgress } = useUIStore();
   const [video, setVideo] = useState(null);
   const [thumbnail, setThumbnail] = useState(null);
   const [caption, setCaption] = useState('');
@@ -47,8 +52,18 @@ export default function ReelCreateScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      setVideo(result.assets[0].base64);
-      setThumbnail(result.assets[0].uri);
+      const asset = result.assets[0];
+
+      // Client-side validation prompt for 2026 standards
+      const isValid = await validateReelDimensions(asset.width, asset.height);
+
+      if (!isValid) {
+        // User cancelled based on the prompt
+        return;
+      }
+
+      setVideo(asset.base64);
+      setThumbnail(asset.uri);
     }
   };
 
@@ -69,30 +84,54 @@ export default function ReelCreateScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      setVideo(result.assets[0].base64);
-      setThumbnail(result.assets[0].uri);
+      const asset = result.assets[0];
+
+      // Client-side validation prompt for 2026 standards
+      const isValid = await validateReelDimensions(asset.width, asset.height);
+
+      if (!isValid) {
+        // User cancelled based on the prompt
+        return;
+      }
+
+      setVideo(asset.base64);
+      setThumbnail(asset.uri);
     }
   };
 
   const handlePost = async () => {
-    if (!video) {
+    if (!video || !user) {
       Alert.alert('Error', 'Please select a video');
       return;
     }
 
     setLoading(true);
+    showPopup('upload', 'Uploading reel...', 0);
+
     try {
-      await api.post('/reels', {
-        video: video,
-        caption: caption || null,
-        audio_name: audioName,
+      const filename = `reels/${user.user_id}/reel_${Date.now()}.mp4`;
+
+      // Simulate progress since uploadMedia is opaque
+      updateProgress(30);
+
+      const publicUrl = await uploadMedia('media', filename, video);
+
+      if (!publicUrl) throw new Error('Upload failed');
+
+      updateProgress(80);
+      showPopup('upload', 'Finalizing reel...', 80);
+
+      await createReel(user.user_id, {
+        videoUrl: publicUrl,
+        caption: caption.trim(),
       });
       
-      Alert.alert('Success', 'Reel posted successfully!');
+      updateProgress(100);
+      showPopup('success', 'Reel posted successfully!');
       router.replace('/(tabs)/reels');
     } catch (error) {
       console.error('Error posting reel:', error);
-      Alert.alert('Error', 'Failed to post reel');
+      showPopup('error', 'Failed to post reel');
     } finally {
       setLoading(false);
     }

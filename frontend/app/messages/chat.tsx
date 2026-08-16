@@ -9,6 +9,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,11 +17,20 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors } from '../../constants/colors';
 import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
+import { useCallStore } from '../../store/callStore';
+import { useUIStore } from '../../store/uiStore';
+import VoiceNoteRecorder from '../../components/voice/VoiceNoteRecorder';
+import VoiceNotePlayer from '../../components/voice/VoiceNotePlayer';
+import { supabase } from '../../utils/supabaseConfig';
+import { decode } from 'base64-arraybuffer';
+import * as FileSystem from 'expo-file-system';
 
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
+  const { initCall } = useCallStore();
+  const { showPopup, updateProgress } = useUIStore();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [otherUser, setOtherUser] = useState(null);
@@ -60,18 +70,101 @@ export default function ChatScreen() {
     }
   };
 
+  const handleVoiceRecordingComplete = async (uri: string, durationMillis: number) => {
+    if (!supabase || !user) return;
+
+    showPopup('upload', 'Sending voice note...', 10);
+    try {
+      const fileName = `${user.user_id}/${Date.now()}.m4a`;
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('voice-notes')
+        .upload(fileName, decode(base64), {
+          contentType: 'audio/m4a',
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('voice-notes')
+        .getPublicUrl(fileName);
+
+      updateProgress(60);
+
+      // Create voice_note entry
+      const { data: voiceNote, error: voiceNoteError } = await supabase
+        .from('voice_notes')
+        .insert({
+          owner_id: user.user_id,
+          context_type: 'dm',
+          audio_url: publicUrl,
+          duration_seconds: Math.floor(durationMillis / 1000),
+        })
+        .select()
+        .single();
+
+      if (voiceNoteError) throw voiceNoteError;
+
+      updateProgress(80);
+
+      // Send message with voice_note_id
+      await api.post('/messages', {
+        receiver_id: userId,
+        text: '',
+        message_type: 'voice',
+        voice_note_id: voiceNote.id,
+      });
+
+      updateProgress(100);
+      showPopup('success', 'Voice note sent!');
+      await loadChat();
+    } catch (error) {
+      console.error('Error handling voice recording:', error);
+      showPopup('error', 'Failed to send voice note');
+    }
+  };
+
   const renderMessage = ({ item }) => {
     const isMe = item.sender_id === user?.user_id;
     
     return (
       <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.theirMessage]}>
         <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.theirBubble]}>
-          <Text style={[styles.messageText, isMe && styles.myMessageText]}>
-            {item.text}
-          </Text>
+          {item.message_type === 'voice' && item.voice_note ? (
+            <VoiceNotePlayer
+              uri={item.voice_note.audio_url}
+              durationSeconds={item.voice_note.duration_seconds}
+            />
+          ) : (
+            <Text style={[styles.messageText, isMe && styles.myMessageText]}>
+              {item.text}
+            </Text>
+          )}
+          {item.transcript_text && (
+            <Text style={styles.transcriptText}>{item.transcript_text}</Text>
+          )}
         </View>
       </View>
     );
+  };
+
+  const handleVideoCall = () => {
+    if (!userId) {
+      Alert.alert('Error', 'User ID not found');
+      return;
+    }
+    console.log('[Chat] Starting video call to:', userId);
+    initCall(userId, 'video', otherUser?.name, otherUser?.picture);
+  };
+
+  const handleVoiceCall = () => {
+    if (!userId) {
+      Alert.alert('Error', 'User ID not found');
+      return;
+    }
+    console.log('[Chat] Starting voice call to:', userId);
+    initCall(userId, 'voice', otherUser?.name, otherUser?.picture);
   };
 
   return (
@@ -89,11 +182,11 @@ export default function ChatScreen() {
           <Text style={styles.headerName}>{otherUser?.name}</Text>
           <Text style={styles.headerUsername}>@{otherUser?.username}</Text>
         </View>
-        <TouchableOpacity>
-          <Ionicons name="videocam" size={28} color={Colors.text} />
+        <TouchableOpacity onPress={handleVideoCall}>
+          <Ionicons name="videocam" size={28} color={Colors.primary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.headerIcon}>
-          <Ionicons name="call" size={26} color={Colors.text} />
+        <TouchableOpacity style={styles.headerIcon} onPress={handleVoiceCall}>
+          <Ionicons name="call" size={26} color={Colors.primary} />
         </TouchableOpacity>
       </View>
 
@@ -126,9 +219,13 @@ export default function ChatScreen() {
             onChangeText={setNewMessage}
             multiline
           />
-          <TouchableOpacity onPress={sendMessage}>
-            <Ionicons name="send" size={24} color={Colors.primary} />
-          </TouchableOpacity>
+          {newMessage.trim().length > 0 ? (
+            <TouchableOpacity onPress={sendMessage}>
+              <Ionicons name="send" size={24} color={Colors.primary} />
+            </TouchableOpacity>
+          ) : (
+            <VoiceNoteRecorder onRecordingComplete={handleVoiceRecordingComplete} />
+          )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -203,6 +300,15 @@ const styles = StyleSheet.create({
   },
   myMessageText: {
     color: Colors.background,
+  },
+  transcriptText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+    paddingTop: 4,
   },
   inputContainer: {
     flexDirection: 'row',

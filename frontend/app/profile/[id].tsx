@@ -10,55 +10,68 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
-import { LinearGradient } from 'expo-linear-gradient';
+import { supabase } from '../../utils/supabaseConfig';
+import StoryHighlight from '../../components/instagram-parity/StoryHighlight';
 
-const { width } = Dimensions.get('window');
-const GRID_SIZE = (width - 4) / 3;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_SIZE = (SCREEN_WIDTH - 4) / 3;
 
 export default function UserProfileScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const { user: currentUser } = useAuthStore();
   
-  const [user, setUser] = useState(null);
-  const [posts, setPosts] = useState([]);
-  const [reels, setReels] = useState([]);
-  const [stories, setStories] = useState([]);
-  const [activeTab, setActiveTab] = useState('posts');
+  const [user, setUser] = useState<any>(null);
+  const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
+  const [activeTab, setActiveTab] = useState('grid');
+  const [isOnline, setIsOnline] = useState(true); // Placeholder
+
+  const isOwnProfile = id === currentUser?.user_id || !id;
 
   useEffect(() => {
     loadUserProfile();
   }, [id]);
 
   const loadUserProfile = async () => {
+    if (!supabase) return;
     try {
       setLoading(true);
+      const targetId = id || currentUser?.user_id;
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', targetId)
+        .single();
+
+      if (error) throw error;
+      setUser(profile);
+
+      const { data: userPosts, error: postsError } = await supabase
+        .from('posts')
+        .select('*, post_media(*)')
+        .eq('user_id', targetId)
+        .order('created_at', { ascending: false });
       
-      const [userRes, postsRes, reelsRes, storiesRes] = await Promise.all([
-        api.get('/users/' + id),
-        api.get('/users/' + id + '/posts').catch(() => ({ data: [] })),
-        api.get('/reels/user/' + id).catch(() => ({ data: [] })),
-        api.get('/stories/user/' + id).catch(() => ({ data: [] })),
-      ]);
-      
-      setUser(userRes.data);
-      setPosts(postsRes.data || []);
-      setReels(reelsRes.data || []);
-      setStories(storiesRes.data || []);
-      
-      // Check if following
-      setIsFollowing(currentUser?.following?.includes(id));
+      if (postsError) throw postsError;
+
+      const formattedPosts = (userPosts || []).map(post => ({
+        ...post,
+        media_url: post.post_media && post.post_media.length > 0 ? post.post_media[0].media_url : '',
+        media_type: post.post_media && post.post_media.length > 0 ? post.post_media[0].media_type : 'image',
+      }));
+
+      setPosts(formattedPosts);
     } catch (error) {
       console.error('Error loading profile:', error);
       Alert.alert('Error', 'User not found');
@@ -68,491 +81,210 @@ export default function UserProfileScreen() {
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadUserProfile();
-    setRefreshing(false);
-  };
-
-  const handleFollow = async () => {
-    try {
-      if (isFollowing) {
-        await api.post('/users/' + id + '/unfollow');
-        setUser(prev => ({
-          ...prev,
-          followers_count: (prev.followers_count || 0) - 1
-        }));
-      } else {
-        await api.post('/users/' + id + '/follow');
-        setUser(prev => ({
-          ...prev,
-          followers_count: (prev.followers_count || 0) + 1
-        }));
-      }
-      setIsFollowing(!isFollowing);
-    } catch (error) {
-      console.error('Error following:', error);
-    }
-  };
-
-  const handleMessage = () => {
-    router.push('/chat/' + id);
-  };
-
-  const handleBlock = async () => {
-    Alert.alert(
-      'Block User',
-      'Are you sure you want to block this user?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Block',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.post('/users/' + id + '/block');
-              Alert.alert('Blocked', 'User has been blocked');
-              router.back();
-            } catch (error) {
-              console.error('Error blocking:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const getUserPic = () => {
-    if (user?.picture) {
-      if (user.picture.startsWith('http')) return user.picture;
-      return 'data:image/jpeg;base64,' + user.picture;
-    }
-    return 'https://via.placeholder.com/150';
-  };
-
-  const getActiveData = () => {
-    switch (activeTab) {
-      case 'posts':
-        return posts;
-      case 'reels':
-        return reels;
-      default:
-        return [];
-    }
-  };
-
-  const renderGridItem = ({ item }) => {
-    const getImage = () => {
-      if (item.image) {
-        return 'data:image/jpeg;base64,' + item.image;
-      }
-      if (item.video) {
-        return 'data:video/mp4;base64,' + item.video;
-      }
-      return 'https://via.placeholder.com/150';
-    };
-
-    return (
-      <TouchableOpacity 
-        style={styles.gridItem}
-        onPress={() => router.push('/post/' + (item.post_id || item.reel_id))}
-      >
-        <Image source={{ uri: getImage() }} style={styles.gridImage} />
-        {activeTab === 'reels' && (
-          <View style={styles.reelIndicator}>
-            <Ionicons name="play" size={16} color="#fff" />
-          </View>
-        )}
-      </TouchableOpacity>
-    );
+  const handleFollow = () => {
+    setIsFollowing(!isFollowing);
   };
 
   const renderHeader = () => (
-    <View style={styles.profileContent}>
-      {/* Profile Info Row */}
-      <View style={styles.profileRow}>
-        {/* Profile Picture with Story Ring */}
-        <TouchableOpacity 
-          style={styles.profilePicContainer}
-          onPress={() => stories.length > 0 && router.push('/story/view?userId=' + id)}
-        >
-          {stories.length > 0 ? (
-            <LinearGradient
-              colors={['#00d9ff', '#00ffcc', '#4fffb0']}
-              style={styles.storyRing}
-            >
-              <View style={styles.storyRingInner}>
-                <Image source={{ uri: getUserPic() }} style={styles.profilePic} />
-              </View>
-            </LinearGradient>
-          ) : (
-            <Image source={{ uri: getUserPic() }} style={styles.profilePic} />
+    <View style={styles.headerContent}>
+      {/* Top Row: Avatar and Stats */}
+      <View style={styles.topRow}>
+        <View style={styles.profilePicContainer}>
+          <Image
+            key={user?.avatar_url || 'default'} // Add key to force re-render
+            source={{ uri: user?.avatar_url || 'https://via.placeholder.com/150' }}
+            style={styles.profilePic}
+          />
+          {isOnline && <View style={styles.onlineBadge} />}
+          {isOwnProfile && (
+            <TouchableOpacity style={styles.addAvatarBtn}>
+              <Ionicons name="add" size={16} color="#fff" />
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+        </View>
 
-        {/* Stats */}
-        <View style={styles.statsContainer}>
+        <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{posts.length}</Text>
             <Text style={styles.statLabel}>Posts</Text>
           </View>
-          <TouchableOpacity style={styles.statItem}>
-            <Text style={styles.statNumber}>{user?.followers_count || user?.followers?.length || 0}</Text>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{user?.followers_count || '1.2K'}</Text>
             <Text style={styles.statLabel}>Followers</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.statItem}>
-            <Text style={styles.statNumber}>{user?.following_count || user?.following?.length || 0}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{user?.following_count || '450'}</Text>
             <Text style={styles.statLabel}>Following</Text>
-          </TouchableOpacity>
+          </View>
         </View>
       </View>
 
-      {/* Name & Bio */}
-      <View style={styles.bioSection}>
-        <Text style={styles.displayName}>{user?.name}</Text>
-        {user?.bio && <Text style={styles.bio}>{user.bio}</Text>}
-        {user?.link && (
-          <TouchableOpacity>
-            <Text style={styles.link}>{user.link}</Text>
-          </TouchableOpacity>
+      {/* Info Section */}
+      <View style={styles.infoSection}>
+        <Text style={styles.fullName}>{user?.full_name || user?.username}</Text>
+        <Text style={styles.bio}>{user?.bio || 'Digital Creator | Content Enthusiast'}</Text>
+
+        {/* Profile Music */}
+        <TouchableOpacity style={styles.musicBar}>
+          <Ionicons name="musical-notes" size={14} color={Colors.primary} />
+          <Text style={styles.musicText}>Odisha Music - MARB Original</Text>
+        </TouchableOpacity>
+
+        {isOwnProfile && (
+            <TouchableOpacity style={styles.dashboardBtn} onPress={() => router.push('/professional-dashboard')}>
+              <Text style={styles.dashboardText}>Professional Dashboard</Text>
+              <Text style={styles.dashboardSub}>1.2K accounts reached in the last 30 days.</Text>
+            </TouchableOpacity>
+        )}
+
+        {!isOwnProfile && (
+            <View style={styles.mutualSection}>
+                <View style={styles.mutualAvatars}>
+                    <Image source={{ uri: 'https://via.placeholder.com/50' }} style={styles.mutualSmallAvatar} />
+                    <Image source={{ uri: 'https://via.placeholder.com/50' }} style={[styles.mutualSmallAvatar, { marginLeft: -12 }]} />
+                </View>
+                <Text style={styles.mutualText}>Followed by <Text style={styles.boldText}>Rahul</Text>, <Text style={styles.boldText}>Priya</Text> + 12 more</Text>
+            </View>
         )}
       </View>
 
       {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={[styles.followBtn, isFollowing && styles.followingBtn]}
-          onPress={handleFollow}
-        >
-          <Text style={[styles.followBtnText, isFollowing && styles.followingBtnText]}>
-            {isFollowing ? 'Following' : 'Follow'}
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.messageBtn} onPress={handleMessage}>
-          <Text style={styles.messageBtnText}>Message</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.moreBtn} onPress={() => setShowOptions(true)}>
-          <Ionicons name="chevron-down" size={18} color={Colors.text} />
-        </TouchableOpacity>
+      <View style={styles.actionsRow}>
+        {isOwnProfile ? (
+          <>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => router.push('/profile/edit')}>
+              <Text style={styles.actionBtnText}>Edit Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn}>
+              <Text style={styles.actionBtnText}>Share Profile</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity style={[styles.followBtn, isFollowing && styles.followingBtn]} onPress={handleFollow}>
+              <Text style={[styles.followBtnText, isFollowing && styles.followingBtnText]}>
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => {
+              const targetId = id || currentUser?.user_id;
+              router.push(`/messages/chat?userId=${targetId}`);
+            }}>
+              <Text style={styles.actionBtnText}>Message</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
+      {/* Highlights */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.highlightsContainer}>
+        {isOwnProfile && <StoryHighlight title="New" isNew />}
+        <StoryHighlight title="Odisha" coverUrl="https://via.placeholder.com/100" />
+        <StoryHighlight title="Travel" coverUrl="https://via.placeholder.com/100" />
+        <StoryHighlight title="Work" coverUrl="https://via.placeholder.com/100" />
+        <StoryHighlight title="Nature" coverUrl="https://via.placeholder.com/100" />
+      </ScrollView>
+
       {/* Tabs */}
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'posts' && styles.activeTab]}
-          onPress={() => setActiveTab('posts')}
-        >
-          <Ionicons
-            name="grid-outline"
-            size={24}
-            color={activeTab === 'posts' ? Colors.primary : Colors.textSecondary}
-          />
+      <View style={styles.tabsRow}>
+        <TouchableOpacity style={[styles.tab, activeTab === 'grid' && styles.activeTab]} onPress={() => setActiveTab('grid')}>
+          <Ionicons name="grid-outline" size={24} color={activeTab === 'grid' ? Colors.primary : Colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'reels' && styles.activeTab]}
-          onPress={() => setActiveTab('reels')}
-        >
-          <Ionicons
-            name="play-circle-outline"
-            size={24}
-            color={activeTab === 'reels' ? Colors.primary : Colors.textSecondary}
-          />
+        <TouchableOpacity style={[styles.tab, activeTab === 'reels' && styles.activeTab]} onPress={() => setActiveTab('reels')}>
+          <MaterialCommunityIcons name="play-box-outline" size={24} color={activeTab === 'reels' ? Colors.primary : Colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'tagged' && styles.activeTab]}
-          onPress={() => setActiveTab('tagged')}
-        >
-          <Ionicons
-            name="person-outline"
-            size={24}
-            color={activeTab === 'tagged' ? Colors.primary : Colors.textSecondary}
-          />
+        <TouchableOpacity style={[styles.tab, activeTab === 'tagged' && styles.activeTab]} onPress={() => setActiveTab('tagged')}>
+          <Ionicons name="person-outline" size={24} color={activeTab === 'tagged' ? Colors.primary : Colors.textSecondary} />
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  if (loading) {
+  const renderItem = ({ item, index }: { item: any; index: number }) => {
+    const isVideo = item.media_type === 'video';
+
     return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </SafeAreaView>
+      <TouchableOpacity
+        style={styles.postThumbnail}
+        onPress={() => {
+          if (isVideo && activeTab === 'reels') {
+            router.push('/(tabs)/reels');
+          } else {
+            // Pass the user ID and index so the detail screen can load all posts
+            const targetId = id || currentUser?.user_id;
+            router.push({
+              pathname: `/post/${item.id}`,
+              params: { userId: targetId, index: index.toString() }
+            });
+          }
+        }}
+      >
+        <Image source={{ uri: item.media_url }} style={styles.postImg} />
+        {item.is_pinned && (
+          <View style={styles.pinIndicator}>
+            <Ionicons name="pin" size={12} color="#fff" />
+          </View>
+        )}
+        {isVideo && (
+          <Ionicons name="play" size={16} color="#fff" style={styles.videoIcon} />
+        )}
+      </TouchableOpacity>
     );
-  }
+  };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={28} color={Colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerUsername}>{user?.username || user?.name}</Text>
-        <TouchableOpacity onPress={() => setShowOptions(true)}>
-          <Ionicons name="ellipsis-horizontal" size={24} color={Colors.text} />
-        </TouchableOpacity>
-      </View>
-
+    <SafeAreaView style={styles.container}>
       <FlatList
-        data={getActiveData()}
-        renderItem={renderGridItem}
-        keyExtractor={(item, index) => item.post_id || item.reel_id || index.toString()}
+        data={posts}
         numColumns={3}
         ListHeaderComponent={renderHeader}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.primary}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons 
-              name={activeTab === 'posts' ? 'camera-outline' : 'play-circle-outline'} 
-              size={48} 
-              color={Colors.textSecondary} 
-            />
-            <Text style={styles.emptyText}>No {activeTab} yet</Text>
-          </View>
-        }
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadUserProfile} />}
       />
-
-      {/* Options Modal */}
-      {showOptions && (
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1}
-          onPress={() => setShowOptions(false)}
-        >
-          <View style={styles.optionsModal}>
-            <TouchableOpacity style={styles.optionItem} onPress={handleBlock}>
-              <Ionicons name="ban-outline" size={24} color="#ff3b5c" />
-              <Text style={[styles.optionText, { color: '#ff3b5c' }]}>Block</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.optionItem}>
-              <Ionicons name="flag-outline" size={24} color="#ff3b5c" />
-              <Text style={[styles.optionText, { color: '#ff3b5c' }]}>Report</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.optionItem}>
-              <Ionicons name="volume-mute-outline" size={24} color={Colors.text} />
-              <Text style={styles.optionText}>Mute</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.optionItem}>
-              <Ionicons name="shield-outline" size={24} color={Colors.text} />
-              <Text style={styles.optionText}>Restrict</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.optionItem} onPress={() => setShowOptions(false)}>
-              <Ionicons name="close-outline" size={24} color={Colors.text} />
-              <Text style={styles.optionText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  headerUsername: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  profileContent: {
-    paddingHorizontal: 16,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  profilePicContainer: {
-    marginRight: 24,
-  },
-  storyRing: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    padding: 3,
-  },
-  storyRingInner: {
-    flex: 1,
-    borderRadius: 42,
-    backgroundColor: Colors.background,
-    padding: 2,
-  },
-  profilePic: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  statsContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  statLabel: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  bioSection: {
-    paddingBottom: 16,
-  },
-  displayName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  bio: {
-    fontSize: 14,
-    color: Colors.text,
-    lineHeight: 20,
-  },
-  link: {
-    fontSize: 14,
-    color: Colors.primary,
-    marginTop: 4,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingBottom: 16,
-  },
-  followBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  followingBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  followBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  followingBtnText: {
-    color: Colors.text,
-  },
-  messageBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: Colors.cardBackground,
-    alignItems: 'center',
-  },
-  messageBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  moreBtn: {
-    width: 40,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: Colors.cardBackground,
-    alignItems: 'center',
-  },
-  tabs: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  activeTab: {
-    borderBottomColor: Colors.primary,
-  },
-  gridItem: {
-    width: GRID_SIZE,
-    height: GRID_SIZE,
-    position: 'relative',
-  },
-  gridImage: {
-    width: '100%',
-    height: '100%',
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-  },
-  reelIndicator: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    marginTop: 12,
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  optionsModal: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: width * 0.8,
-    padding: 8,
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  optionText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
+  headerContent: { padding: 16 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  profilePicContainer: { position: 'relative' },
+  profilePic: { width: 80, height: 80, borderRadius: 40, borderWidth: 1, borderColor: Colors.border },
+  addAvatarBtn: { position: 'absolute', bottom: 0, right: 0, backgroundColor: Colors.primary, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.background, justifyContent: 'center', alignItems: 'center' },
+  onlineBadge: { position: 'absolute', bottom: 4, right: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: '#4caf50', borderWidth: 2, borderColor: Colors.background, zIndex: 1 },
+  statsRow: { flexDirection: 'row', gap: 20 },
+  statItem: { alignItems: 'center' },
+  statNumber: { color: Colors.text, fontSize: 18, fontWeight: 'bold' },
+  statLabel: { color: Colors.textSecondary, fontSize: 12 },
+  infoSection: { marginTop: 12 },
+  fullName: { color: Colors.text, fontSize: 15, fontWeight: 'bold' },
+  bio: { color: Colors.text, fontSize: 14, marginTop: 2, lineHeight: 18 },
+  musicBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surface, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start', marginTop: 10 },
+  musicText: { color: Colors.text, fontSize: 12, fontWeight: '500' },
+  dashboardBtn: { backgroundColor: Colors.surface, padding: 12, borderRadius: 8, marginTop: 12 },
+  dashboardText: { color: Colors.text, fontSize: 14, fontWeight: '600' },
+  dashboardSub: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
+  mutualSection: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
+  mutualAvatars: { flexDirection: 'row' },
+  mutualSmallAvatar: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: Colors.background },
+  mutualText: { color: Colors.textSecondary, fontSize: 12, flex: 1 },
+  boldText: { color: Colors.text, fontWeight: '600' },
+  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  actionBtn: { flex: 1, backgroundColor: Colors.surface, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  actionBtnText: { color: Colors.text, fontSize: 14, fontWeight: '600' },
+  followBtn: { flex: 1, backgroundColor: Colors.primary, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  followBtnText: { color: '#000', fontSize: 14, fontWeight: '600' },
+  followingBtn: { backgroundColor: Colors.surface },
+  followingBtnText: { color: Colors.text },
+  highlightsContainer: { marginTop: 20, marginBottom: 8 },
+  tabsRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: Colors.border, marginTop: 16 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  activeTab: { borderBottomWidth: 2, borderBottomColor: Colors.primary },
+  postThumbnail: { width: GRID_SIZE, height: (GRID_SIZE * 4) / 3, padding: 1 },
+  postImg: { width: '100%', height: '100%', borderRadius: 4 },
+  pinIndicator: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 10 },
+  videoIcon: { position: 'absolute', top: 8, right: 8 },
 });

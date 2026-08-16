@@ -16,6 +16,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,20 @@ import { Colors } from '../../constants/colors';
 import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
 import { LinearGradient } from 'expo-linear-gradient';
+import VoiceNoteRecorder from '../../components/voice/VoiceNoteRecorder';
+import VoiceNotePlayer from '../../components/voice/VoiceNotePlayer';
+import InstagramPost from '../../components/InstagramPost';
+import { supabase } from '../../utils/supabaseConfig';
+import {
+  getUnifiedFeed,
+  getActiveStories,
+  getComments,
+  addComment,
+  deleteComment
+} from '../../utils/supabaseHelpers';
+import { formatDistanceToNow } from 'date-fns';
+import { decode } from 'base64-arraybuffer';
+import * as FileSystem from 'expo-file-system';
 
 const { width, height } = Dimensions.get('window');
 const STORY_SIZE = 75;
@@ -35,10 +50,12 @@ export default function HomeScreen() {
   const [stories, setStories] = useState([]);
   const [posts, setPosts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedMood, setSelectedMood] = useState('Neutral');
   const [myStories, setMyStories] = useState([]);
   const [followingIds, setFollowingIds] = useState([]);
   const [savedPosts, setSavedPosts] = useState([]);
-  
+  const [activePostId, setActivePostId] = useState(null);
+
   // Comments Modal
   const [showComments, setShowComments] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -60,24 +77,38 @@ export default function HomeScreen() {
 
   const loadData = async () => {
     try {
-      const [storiesRes, postsRes, myStoriesRes] = await Promise.all([
-        api.get('/stories'),
-        api.get('/posts/feed'),
-        api.get('/stories/user/' + (user ? user.user_id : '')),
+      const [feedItems, activeStories] = await Promise.all([
+        getUnifiedFeed(50),
+        getActiveStories()
       ]);
-      setStories(storiesRes.data || []);
-      setPosts(postsRes.data || []);
-      setMyStories(myStoriesRes.data || []);
+      setPosts(feedItems);
+
+      // Update myStories status
+      if (user) {
+        const myActiveStories = activeStories.filter(s => s.user_id === user.user_id);
+        setMyStories(myActiveStories);
+
+        // Ensure stories list includes everyone ELSE first
+        setStories(activeStories.filter(s => s.user_id !== user.user_id));
+      } else {
+        setStories(activeStories);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
-      try {
-        const exploreRes = await api.get('/posts/explore?limit=50');
-        setPosts(exploreRes.data || []);
-      } catch (e) {
-        console.error('Error loading explore posts:', e);
-      }
     }
   };
+
+  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+    if (viewableItems && viewableItems.length > 0) {
+      // Focus on the first most visible item
+      setActivePostId(viewableItems[0].item.post_id);
+    }
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 70, // Increase threshold for better accuracy
+    minimumViewTime: 150,
+  }).current;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -195,53 +226,77 @@ export default function HomeScreen() {
     }
   };
 
-  const openComments = (post) => {
+  const openComments = async (post) => {
     setSelectedPost(post);
-    setComments(post.comments || []);
     setShowComments(true);
+    const postComments = await getComments(post.post_id, post.type || 'post');
+    setComments(postComments);
   };
 
   const handleAddComment = async () => {
-    if (!commentText.trim() || !selectedPost) return;
+    if (!commentText.trim() || !selectedPost || !user) return;
     
     try {
-      const response = await api.post('/posts/' + selectedPost.post_id + '/comment', {
-        text: commentText.trim()
-      });
+      const newComment = await addComment(
+        user.user_id,
+        selectedPost.post_id,
+        selectedPost.type || 'post',
+        commentText.trim()
+      );
       
-      const newComment = {
-        comment_id: Date.now().toString(),
-        user_id: user.user_id,
-        user_name: user.name,
-        user_picture: user.picture,
-        text: commentText.trim(),
-        created_at: new Date().toISOString()
-      };
-      
-      setComments([...comments, newComment]);
-      setCommentText('');
-      
-      // Update post in list
-      setPosts(posts.map(p => {
-        if (p.post_id === selectedPost.post_id) {
-          return { ...p, comments: [...(p.comments || []), newComment] };
-        }
-        return p;
-      }));
+      if (newComment) {
+        setComments([...comments, newComment]);
+        setCommentText('');
+
+        // Update post in list count
+        setPosts(posts.map(p => {
+          if (p.post_id === selectedPost.post_id) {
+            return { ...p, comments_count: (p.comments_count || 0) + 1 };
+          }
+          return p;
+        }));
+      }
     } catch (error) {
       console.error('Error adding comment:', error);
     }
   };
 
-  const getUserPicture = () => {
-    if (user && user.picture) {
-      if (user.picture.startsWith('http')) {
-        return user.picture;
-      }
-      return 'data:image/jpeg;base64,' + user.picture;
+  const handleDeleteComment = async (commentId) => {
+    if (!user) return;
+    const success = await deleteComment(commentId, user.user_id);
+    if (success) {
+      setComments(comments.filter(c => c.id !== commentId));
+      setPosts(posts.map(p => {
+        if (p.post_id === selectedPost.post_id) {
+          return { ...p, comments_count: Math.max(0, (p.comments_count || 0) - 1) };
+        }
+        return p;
+      }));
     }
-    return 'https://via.placeholder.com/100';
   };
+
+  const getUserPicture = () => {
+    if (user) {
+        if (user.profilePicUrl) return user.profilePicUrl;
+        if (user.avatar_url) return user.avatar_url;
+        if (user.picture) {
+            if (user.picture.startsWith('http')) return user.picture;
+            return 'data:image/jpeg;base64,' + user.picture;
+        }
+    }
+    return 'https://via.placeholder.com/150';
+  };
+
+  const MOODS = [
+    { name: 'Neutral', icon: '😐' },
+    { name: 'Happy', icon: '😊' },
+    { name: 'Sad', icon: '😢' },
+    { name: 'Motivated', icon: '🔥' },
+    { name: 'Bored', icon: '😴' },
+    { name: 'Romantic', icon: '❤️' },
+    { name: 'Love', icon: '🥰' },
+    { name: 'Excited', icon: '🤩' },
+  ];
 
   const renderHeader = () => (
     <View>
@@ -255,16 +310,31 @@ export default function HomeScreen() {
           <Text style={styles.headerTitle}>MARB</Text>
         </View>
         <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/unique')}>
+            <Ionicons name="grid-outline" size={24} color={Colors.primary} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/notifications')}>
             <Ionicons name="heart-outline" size={28} color={Colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/create')}>
-            <Ionicons name="camera-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/(tabs)/messages')}>
             <Ionicons name="chatbubble-outline" size={26} color={Colors.text} />
           </TouchableOpacity>
         </View>
+      </View>
+
+      <View style={styles.moodContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moodList}>
+          {MOODS.map(mood => (
+            <TouchableOpacity
+              key={mood.name}
+              style={[styles.moodItem, selectedMood === mood.name && styles.activeMood]}
+              onPress={() => setSelectedMood(mood.name)}
+            >
+              <Text style={styles.moodIcon}>{mood.icon}</Text>
+              <Text style={[styles.moodText, selectedMood === mood.name && styles.activeMoodText]}>{mood.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       <View style={styles.storiesContainer}>
@@ -283,18 +353,17 @@ export default function HomeScreen() {
 
   const renderMyStory = () => {
     const hasStory = myStories.length > 0;
-    const storyCount = myStories.length;
-    
+
     return (
       <View style={styles.storyItem}>
-        <TouchableOpacity 
-          style={styles.storyCircleContainer} 
-          activeOpacity={0.7} 
-          onPress={handleViewMyStory}
-        >
-          {hasStory ? (
+        <View style={styles.storyCircleContainer}>
+          {/* 1. Profile Circle - View Story if exists, else Upload */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={handleViewMyStory}
+          >
             <LinearGradient
-              colors={['#00d9ff', '#00ffcc', '#4fffb0']}
+              colors={hasStory ? ['#00d9ff', '#00ffcc', '#4fffb0'] : ['#333', '#333']}
               style={styles.storyGradientRing}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -306,23 +375,17 @@ export default function HomeScreen() {
                 />
               </View>
             </LinearGradient>
-          ) : (
-            <View style={styles.storyNoRing}>
-              <Image
-                source={{ uri: getUserPicture() }}
-                style={styles.storyProfileImage}
-              />
-            </View>
-          )}
+          </TouchableOpacity>
           
-          <TouchableOpacity 
+          {/* 2. Dedicated Plus Button - Always for Upload */}
+          <TouchableOpacity
             style={styles.addStoryPlusButton}
             onPress={handleAddStory}
             activeOpacity={0.8}
           >
             <Ionicons name="add" size={14} color="#fff" />
           </TouchableOpacity>
-        </TouchableOpacity>
+        </View>
         
         <Text style={styles.storyUsername} numberOfLines={1}>Your story</Text>
       </View>
@@ -514,30 +577,91 @@ export default function HomeScreen() {
     );
   };
 
-  const renderPost = ({ item }) => <PostItem item={item} />;
+  const renderPost = ({ item }) => (
+    <InstagramPost
+        item={item}
+        onCommentPress={() => openComments(item)}
+        shouldPlay={item.post_id === activePostId}
+    />
+  );
+
+  const handleCommentVoiceComplete = async (uri: string, durationMillis: number) => {
+    if (!supabase || !user || !selectedPost) return;
+
+    try {
+      const fileName = `${user.user_id}/comment_${Date.now()}.m4a`;
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('voice-notes')
+        .upload(fileName, decode(base64), {
+          contentType: 'audio/m4a',
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('voice-notes')
+        .getPublicUrl(fileName);
+
+      const { data: voiceNote, error: voiceNoteError } = await supabase
+        .from('voice_notes')
+        .insert({
+          owner_id: user.user_id,
+          context_type: 'comment',
+          audio_url: publicUrl,
+          duration_seconds: Math.floor(durationMillis / 1000),
+        })
+        .select()
+        .single();
+
+      if (voiceNoteError) throw voiceNoteError;
+
+      await api.post(`/posts/${selectedPost.post_id}/comment`, {
+        text: '',
+        voice_note_id: voiceNote.id,
+      });
+
+      await loadData();
+      setShowComments(false);
+    } catch (error) {
+      console.error('Error handling comment voice:', error);
+      Alert.alert('Error', 'Failed to send voice comment');
+    }
+  };
 
   const renderComment = ({ item }) => {
-    const getCommentUserPic = () => {
-      if (item.user_picture) {
-        if (item.user_picture.startsWith('http')) {
-          return item.user_picture;
-        }
-        return 'data:image/jpeg;base64,' + item.user_picture;
-      }
-      return 'https://via.placeholder.com/100';
-    };
+    const isMe = item.user_id === user?.user_id;
+    const profile = item.profiles || {};
 
     return (
       <View style={styles.commentItem}>
-        <Image source={{ uri: getCommentUserPic() }} style={styles.commentUserImage} />
+        <Image
+          source={{ uri: profile.avatar_url || 'https://via.placeholder.com/100' }}
+          style={styles.commentUserImage}
+        />
         <View style={styles.commentContent}>
-          <Text style={styles.commentText}>
-            <Text style={styles.commentUsername}>{item.user_name} </Text>
-            {item.text}
-          </Text>
-          <Text style={styles.commentTime}>
-            {item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}
-          </Text>
+          <View style={styles.commentTextContainer}>
+            <Text style={styles.commentUsername}>{profile.username || 'User'} </Text>
+            {item.voice_note ? (
+              <VoiceNotePlayer
+                uri={item.voice_note.audio_url}
+                durationSeconds={item.voice_note.duration_seconds}
+              />
+            ) : (
+              <Text style={styles.commentText}>{item.content}</Text>
+            )}
+          </View>
+          <View style={styles.commentFooter}>
+            <Text style={styles.commentTime}>
+              {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+            </Text>
+            {isMe && (
+              <TouchableOpacity onPress={() => handleDeleteComment(item.id)}>
+                <Text style={styles.deleteCommentText}>Delete</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
         <TouchableOpacity>
           <Ionicons name="heart-outline" size={14} color={Colors.textSecondary} />
@@ -560,6 +684,8 @@ export default function HomeScreen() {
             tintColor={Colors.primary}
           />
         }
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="images-outline" size={64} color={Colors.textSecondary} />
@@ -613,14 +739,18 @@ export default function HomeScreen() {
                 onChangeText={setCommentText}
                 multiline
               />
-              <TouchableOpacity 
-                onPress={handleAddComment}
-                disabled={!commentText.trim()}
-              >
-                <Text style={[styles.postButton, !commentText.trim() && styles.postButtonDisabled]}>
-                  Post
-                </Text>
-              </TouchableOpacity>
+              {commentText.trim().length > 0 ? (
+                <TouchableOpacity
+                  onPress={handleAddComment}
+                  disabled={!commentText.trim()}
+                >
+                  <Text style={[styles.postButton, !commentText.trim() && styles.postButtonDisabled]}>
+                    Post
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <VoiceNoteRecorder onRecordingComplete={handleCommentVoiceComplete} />
+              )}
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -669,6 +799,42 @@ const styles = StyleSheet.create({
   },
   headerIcon: {
     padding: 4,
+  },
+  moodContainer: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  moodList: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  moodItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBackground,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
+  },
+  activeMood: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  moodIcon: {
+    fontSize: 16,
+  },
+  moodText: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  activeMoodText: {
+    color: '#fff',
   },
   storiesContainer: {
     paddingVertical: 12,
@@ -910,10 +1076,33 @@ const styles = StyleSheet.create({
   commentUsername: {
     fontWeight: '600',
   },
+  commentTextContainer: {
+    flexDirection: 'column',
+    gap: 4,
+  },
+  commentTranscript: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+    paddingTop: 4,
+  },
   commentTime: {
     fontSize: 12,
     color: Colors.textSecondary,
+  },
+  commentFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     marginTop: 4,
+  },
+  deleteCommentText: {
+    fontSize: 12,
+    color: Colors.error,
+    fontWeight: '600',
   },
   noComments: {
     alignItems: 'center',

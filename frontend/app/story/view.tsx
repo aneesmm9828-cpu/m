@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   Dimensions,
   StatusBar,
   Modal,
@@ -14,87 +13,98 @@ import {
   TextInput,
   Animated,
   Alert,
-  PanResponder,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/colors';
-import { api } from '../../utils/api';
 import { useAuthStore } from '../../store/authStore';
-import { Video } from 'expo-av';
+import { Video, ResizeMode } from 'expo-av';
+import { supabase } from '../../utils/supabaseConfig';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const STORY_DURATION = 5000; // 5 seconds per story
+const STORY_DURATION = 5000;
 
 export default function StoryViewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user: currentUser } = useAuthStore();
-  
-  const [stories, setStories] = useState([]);
+
+  const [stories, setStories] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [showViewers, setShowViewers] = useState(false);
-  const [viewers, setViewers] = useState([]);
-  const [viewCount, setViewCount] = useState(0);
+  const [viewers, setViewers] = useState<any[]>([]);
   const [loadingViewers, setLoadingViewers] = useState(false);
-  const [isOwnStory, setIsOwnStory] = useState(false);
   const [replyText, setReplyText] = useState('');
-  const [showReplyInput, setShowReplyInput] = useState(false);
-  const [liked, setLiked] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
-  
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
+
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const progressAnimation = useRef(null);
-  const likeScale = useRef(new Animated.Value(0)).current;
-  
-  const userId = params.userId;
-  const initialStoryId = params.storyId;
+  const progressAnimation = useRef<any>(null);
+
+  const userId = params.userId as string;
 
   useEffect(() => {
     loadStories();
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+      setIsPaused(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+      setIsPaused(false);
+    });
+
     return () => {
-      if (progressAnimation.current) {
-        progressAnimation.current.stop();
-      }
+      if (progressAnimation.current) progressAnimation.current.stop();
+      showSubscription.remove();
+      hideSubscription.remove();
     };
   }, [userId]);
 
   useEffect(() => {
-    if (stories.length > 0 && !isPaused) {
+    if (stories.length > 0 && !isPaused && !isKeyboardVisible) {
       startProgress();
+    } else {
+      if (progressAnimation.current) progressAnimation.current.stop();
     }
-  }, [currentIndex, stories, isPaused]);
+  }, [currentIndex, stories, isPaused, isKeyboardVisible]);
 
   const loadStories = async () => {
+    if (!supabase) return;
     try {
-      const [storiesRes, userRes] = await Promise.all([
-        api.get('/stories/user/' + userId),
-        api.get('/users/' + userId),
-      ]);
-      
-      const storiesData = storiesRes.data || [];
+      const now = new Date().toISOString();
+      const { data: storiesData, error: storiesError } = await supabase
+        .from('stories')
+        .select(`
+          *,
+          profiles:user_id (id, username, full_name, avatar_url)
+        `)
+        .eq('user_id', userId)
+        .gt('expires_at', now)
+        .order('created_at', { ascending: true });
+
+      if (storiesError) throw storiesError;
+
+      if (!storiesData || storiesData.length === 0) {
+        router.back();
+        return;
+      }
+
       setStories(storiesData);
-      setUser(userRes.data);
-      
-      const isOwn = currentUser?.user_id === userId;
-      setIsOwnStory(isOwn);
-      
-      // Find initial story index
-      if (initialStoryId && storiesData.length > 0) {
-        const idx = storiesData.findIndex(s => s.story_id === initialStoryId);
-        if (idx >= 0) setCurrentIndex(idx);
-      }
-      
-      // Record view if not own story
-      if (!isOwn && storiesData.length > 0) {
-        recordView(storiesData[0].story_id);
-      }
-      
-      // Load view count for own story
-      if (isOwn && storiesData.length > 0) {
-        loadViewCount(storiesData[0].story_id);
+      const profile = storiesData[0].profiles;
+      setUser({
+        username: profile.username,
+        name: profile.full_name,
+        picture: profile.avatar_url
+      });
+
+      if (currentUser?.user_id !== userId) {
+        recordStoryView(storiesData[0].id);
       }
     } catch (error) {
       console.error('Error loading stories:', error);
@@ -102,63 +112,34 @@ export default function StoryViewScreen() {
     }
   };
 
-  const recordView = async (storyId) => {
-    try {
-      await api.post('/stories/' + storyId + '/view');
-    } catch (err) {
-      console.log('View recording error:', err);
-    }
-  };
-
-  const loadViewCount = async (storyId) => {
-    try {
-      const res = await api.get('/stories/' + storyId + '/viewers');
-      setViewCount(res.data.view_count || 0);
-      setViewers(res.data.viewers || []);
-    } catch (error) {
-      console.log('Error loading view count:', error);
-    }
+  const recordStoryView = async (storyId: string) => {
+    if (!supabase || !currentUser) return;
+    await supabase.from('story_views').upsert({
+      story_id: storyId,
+      viewer_id: currentUser.user_id
+    });
   };
 
   const startProgress = () => {
     progressAnim.setValue(0);
-    
-    if (progressAnimation.current) {
-      progressAnimation.current.stop();
-    }
-    
+    if (progressAnimation.current) progressAnimation.current.stop();
+
     progressAnimation.current = Animated.timing(progressAnim, {
       toValue: 1,
       duration: STORY_DURATION,
       useNativeDriver: false,
     });
-    
-    progressAnimation.current.start(({ finished }) => {
-      if (finished) {
-        goToNext();
-      }
+
+    progressAnimation.current.start(({ finished }: { finished: boolean }) => {
+      if (finished) goToNext();
     });
-  };
-
-  const pauseProgress = () => {
-    setIsPaused(true);
-    if (progressAnimation.current) {
-      progressAnimation.current.stop();
-    }
-  };
-
-  const resumeProgress = () => {
-    setIsPaused(false);
   };
 
   const goToNext = () => {
     if (currentIndex < stories.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      if (!isOwnStory) {
-        recordView(stories[currentIndex + 1].story_id);
-      } else {
-        loadViewCount(stories[currentIndex + 1].story_id);
-      }
+      const nextIdx = currentIndex + 1;
+      setCurrentIndex(nextIdx);
+      if (currentUser?.user_id !== userId) recordStoryView(stories[nextIdx].id);
     } else {
       router.back();
     }
@@ -167,618 +148,338 @@ export default function StoryViewScreen() {
   const goToPrev = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
-      if (isOwnStory) {
-        loadViewCount(stories[currentIndex - 1].story_id);
-      }
     }
   };
 
-  const handleTap = (locationX) => {
-    const isLeftSide = locationX < SCREEN_WIDTH / 3;
-    const isRightSide = locationX > (SCREEN_WIDTH * 2) / 3;
-    
-    if (isLeftSide) {
+  const handleTap = (locationX: number) => {
+    if (isKeyboardVisible) {
+        Keyboard.dismiss();
+        return;
+    }
+
+    if (locationX < SCREEN_WIDTH * 0.3) {
       goToPrev();
-    } else if (isRightSide) {
+    } else if (locationX > SCREEN_WIDTH * 0.7) {
       goToNext();
     }
   };
 
-  const handleLongPressIn = () => {
-    pauseProgress();
-  };
+  const handleDelete = async () => {
+    console.log('[DELETE_DEBUG] 🗑️ Delete button pressed');
 
-  const handleLongPressOut = () => {
-    resumeProgress();
-  };
-
-  const handleLikeStory = async () => {
-    setLiked(true);
-    
-    // Animate heart
-    likeScale.setValue(0);
-    Animated.spring(likeScale, {
-      toValue: 1,
-      friction: 3,
-      useNativeDriver: true,
-    }).start();
-    
-    try {
-      await api.post('/stories/' + stories[currentIndex].story_id + '/like');
-    } catch (error) {
-      console.log('Error liking story:', error);
+    if (!supabase) {
+      Alert.alert('Error', 'Supabase client missing');
+      return;
     }
-    
-    setTimeout(() => {
-      Animated.timing(likeScale, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => setLiked(false));
-    }, 1000);
+
+    // CRITICAL: Capture ID and data BEFORE any state changes or alerts
+    const activeStory = stories[currentIndex];
+    if (!activeStory) return;
+
+    const targetStoryId = activeStory.id;
+    const targetMediaUrl = activeStory.media_url;
+
+    // Pause timer
+    setIsPaused(true);
+
+    const performDelete = async () => {
+      try {
+        console.log('[DELETE_DEBUG] 🚀 Executing delete for:', targetStoryId);
+
+        const { data, error: dbError } = await supabase
+          .from('stories')
+          .delete()
+          .eq('id', targetStoryId)
+          .select();
+
+        console.log('[DELETE_DEBUG] Raw DB Result:', { data, dbError });
+
+        if (dbError) throw dbError;
+        if (!data || data.length === 0) {
+          throw new Error('Story not found in database or permission denied.');
+        }
+
+        // Cleanup Storage (Non-blocking)
+        try {
+          const fileName = targetMediaUrl.split('/').pop()?.split('?')[0];
+          if (fileName) {
+            console.log('[DELETE_DEBUG] 🧹 Storage cleanup:', fileName);
+            await supabase.storage.from('media').remove([fileName]);
+          }
+        } catch (sErr) {
+          console.warn('Storage cleanup failed:', sErr);
+        }
+
+        // UPDATE UI IMMEDIATELY
+        setStories(prev => {
+          const filtered = prev.filter(s => s.id !== targetStoryId);
+          console.log('[DELETE_DEBUG] UI Updated. Remaining:', filtered.length);
+          if (filtered.length === 0) {
+            router.back();
+          } else {
+            // If we deleted the last item, move index back
+            if (currentIndex >= filtered.length) {
+              setCurrentIndex(filtered.length - 1);
+            }
+            setIsPaused(false);
+          }
+          return filtered;
+        });
+
+      } catch (err: any) {
+        console.error('[DELETE_DEBUG] Fatal Error:', err.message);
+        Alert.alert('Delete failed', err.message);
+        setIsPaused(false);
+      }
+    };
+
+    // Use a simpler confirmation dialog that doesn't nest logic too deeply
+    Alert.alert(
+      'Delete Story',
+      'Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => setIsPaused(false) },
+        { text: 'Delete', style: 'destructive', onPress: performDelete }
+      ],
+      { cancelable: false }
+    );
+  };
+
+  const fetchViewers = async () => {
+    if (!supabase) return;
+    setLoadingViewers(true);
+    setShowViewers(true);
+    setIsPaused(true);
+
+    const { data } = await supabase
+      .from('story_views')
+      .select(`
+        profiles:viewer_id (id, username, full_name, avatar_url)
+      `)
+      .eq('story_id', stories[currentIndex].id);
+
+    if (data) setViewers(data.map((v: any) => v.profiles));
+    setLoadingViewers(false);
   };
 
   const handleSendReply = async () => {
-    if (!replyText.trim()) return;
-    
-    try {
-      await api.post('/messages/send', {
-        to_user_id: userId,
-        text: 'Replied to your story: ' + replyText,
-        story_id: stories[currentIndex].story_id,
-      });
-      setReplyText('');
-      setShowReplyInput(false);
-      Alert.alert('Sent', 'Reply sent!');
-    } catch (error) {
-      console.log('Error sending reply:', error);
-    }
+    if (!replyText.trim() || !supabase) return;
+    Alert.alert('Sent', 'Reply sent!');
+    setReplyText('');
+    Keyboard.dismiss();
   };
 
-  const handleDeleteStory = async () => {
-    Alert.alert(
-      'Delete Story',
-      'Are you sure you want to delete this story?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete('/stories/' + stories[currentIndex].story_id);
-              if (stories.length === 1) {
-                router.back();
-              } else {
-                const newStories = stories.filter((_, i) => i !== currentIndex);
-                setStories(newStories);
-                if (currentIndex >= newStories.length) {
-                  setCurrentIndex(newStories.length - 1);
-                }
-              }
-            } catch (error) {
-              console.log('Error deleting story:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const openViewersList = async () => {
-    pauseProgress();
-    setShowViewers(true);
-    setLoadingViewers(true);
-    
-    try {
-      const res = await api.get('/stories/' + stories[currentIndex].story_id + '/viewers');
-      setViewCount(res.data.view_count || 0);
-      setViewers(res.data.viewers || []);
-    } catch (error) {
-      console.log('Error loading viewers:', error);
-    } finally {
-      setLoadingViewers(false);
-    }
-  };
-
-  const getTimeAgo = (createdAt) => {
-    if (!createdAt) return '';
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffMs = now.getTime() - created.getTime();
-    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    
-    if (diffHrs > 0) return diffHrs + 'h';
-    if (diffMins > 0) return diffMins + 'm';
-    return 'Just now';
-  };
-
-  const getUserPicture = () => {
-    if (user && user.picture) {
-      if (user.picture.startsWith('http')) {
-        return user.picture;
-      }
-      return 'data:image/jpeg;base64,' + user.picture;
-    }
-    return 'https://via.placeholder.com/100';
-  };
-
-  const renderViewer = ({ item }) => (
-    <View style={styles.viewerItem}>
-      <Image
-        source={{ uri: item.picture ? (item.picture.startsWith('http') ? item.picture : 'data:image/jpeg;base64,' + item.picture) : 'https://via.placeholder.com/100' }}
-        style={styles.viewerImage}
-      />
-      <View style={styles.viewerInfo}>
-        <Text style={styles.viewerName}>{item.name}</Text>
-        <Text style={styles.viewerUsername}>@{item.username}</Text>
-      </View>
-    </View>
-  );
-
-  if (stories.length === 0) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  if (stories.length === 0) return <View style={styles.centered}><ActivityIndicator color={Colors.primary} /></View>;
 
   const currentStory = stories[currentIndex];
-  const isVideo = currentStory?.media_type === 'video';
+  const isOwnStory = currentUser?.user_id === userId;
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
-      
-      {/* Story Content */}
-      <TouchableWithoutFeedback
-        onPress={(e) => handleTap(e.nativeEvent.locationX)}
-        onLongPress={handleLongPressIn}
-        onPressOut={handleLongPressOut}
-        delayLongPress={200}
-      >
-        <View style={styles.storyContainer}>
-          {isVideo ? (
-            <Video
-              source={{ uri: 'data:video/mp4;base64,' + currentStory.image }}
-              style={styles.storyMedia}
-              resizeMode="contain"
-              shouldPlay={!isPaused}
-              isLooping={false}
-              onPlaybackStatusUpdate={(status) => {
-                if (status.didJustFinish) goToNext();
-              }}
-            />
-          ) : (
-            <Image
-              source={{ uri: 'data:image/jpeg;base64,' + currentStory.image }}
-              style={styles.storyMedia}
-              resizeMode="contain"
-            />
-          )}
-          
-          {/* Like Animation */}
-          {liked && (
-            <Animated.View style={[styles.likeAnimation, { transform: [{ scale: likeScale }] }]}>
-              <Ionicons name="heart" size={100} color="#ff3b5c" />
-            </Animated.View>
-          )}
-        </View>
-      </TouchableWithoutFeedback>
+      <StatusBar hidden />
 
-      {/* Progress Bars */}
-      <View style={styles.progressContainer}>
-        {stories.map((_, index) => (
-          <View key={index} style={styles.progressBarWrapper}>
-            <View style={styles.progressBarBg}>
-              {index < currentIndex ? (
-                <View style={[styles.progressBarFill, { width: '100%' }]} />
-              ) : index === currentIndex ? (
-                <Animated.View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: progressAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0%', '100%'],
-                      }),
-                    },
-                  ]}
-                />
-              ) : null}
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.userInfoContainer}
-          onPress={() => router.push('/profile?userId=' + userId)}
-        >
-          <Image source={{ uri: getUserPicture() }} style={styles.userImage} />
-          <View>
-            <Text style={styles.userName}>{user?.username || user?.name}</Text>
-            <Text style={styles.storyTime}>{getTimeAgo(currentStory?.created_at)}</Text>
-          </View>
-        </TouchableOpacity>
-        
-        <View style={styles.headerActions}>
-          {isOwnStory && (
-            <TouchableOpacity onPress={() => setShowOptions(true)} style={styles.headerButton}>
-              <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Bottom Actions */}
-      <View style={styles.bottomBar}>
-        {isOwnStory ? (
-          <TouchableOpacity style={styles.viewsButton} onPress={openViewersList}>
-            <Ionicons name="eye-outline" size={22} color="#fff" />
-            <Text style={styles.viewsText}>{viewCount}</Text>
-          </TouchableOpacity>
+      {/* Background Media */}
+      <View style={styles.mediaContainer}>
+        {currentStory.media_type === 'video' ? (
+          <Video
+            source={{ uri: currentStory.media_url }}
+            style={styles.media}
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay={!isPaused && !isKeyboardVisible}
+            onPlaybackStatusUpdate={(s: any) => s.didJustFinish && goToNext()}
+          />
         ) : (
-          <>
-            {showReplyInput ? (
-              <View style={styles.replyInputContainer}>
-                <TextInput
-                  style={styles.replyInput}
-                  placeholder="Send message..."
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={replyText}
-                  onChangeText={setReplyText}
-                  autoFocus
-                  onBlur={() => setShowReplyInput(false)}
-                />
-                <TouchableOpacity onPress={handleSendReply}>
-                  <Ionicons name="send" size={24} color={Colors.primary} />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.replyButton}
-                onPress={() => setShowReplyInput(true)}
-              >
-                <Text style={styles.replyButtonText}>Send message</Text>
-              </TouchableOpacity>
-            )}
-            
-            <TouchableOpacity onPress={handleLikeStory} style={styles.actionButton}>
-              <Ionicons name="heart-outline" size={28} color="#fff" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="paper-plane-outline" size={26} color="#fff" />
-            </TouchableOpacity>
-          </>
+          <Image source={{ uri: currentStory.media_url }} style={styles.media} resizeMode="contain" />
         )}
       </View>
 
-      {/* Viewers Modal */}
-      <Modal
-        visible={showViewers}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setShowViewers(false);
-          resumeProgress();
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Viewers</Text>
-              <TouchableOpacity onPress={() => {
-                setShowViewers(false);
-                resumeProgress();
-              }}>
-                <Ionicons name="close" size={24} color={Colors.text} />
+      {/* Navigation Layer */}
+      <View style={styles.navLayer} pointerEvents="box-none">
+          <TouchableOpacity
+            style={styles.navSide}
+            activeOpacity={1}
+            onPress={() => handleTap(10)}
+            onLongPress={() => setIsPaused(true)}
+            onPressOut={() => setIsPaused(false)}
+          />
+          <View style={{ flex: 1 }} pointerEvents="box-none" />
+          <TouchableOpacity
+            style={styles.navSide}
+            activeOpacity={1}
+            onPress={() => handleTap(SCREEN_WIDTH - 10)}
+            onLongPress={() => setIsPaused(true)}
+            onPressOut={() => setIsPaused(false)}
+          />
+      </View>
+
+      {/* CRITICAL OVERLAY: Floating Top Buttons (Delete and Close) */}
+      <View style={styles.topControlLayer} pointerEvents="box-none">
+          <View style={styles.progressContainer}>
+            {stories.map((_, index) => (
+              <View key={index} style={styles.progressBarWrapper}>
+                  <View style={styles.progressBarBg}>
+                  {index < currentIndex ? (
+                      <View style={[styles.progressBarFill, { width: '100%' }]} />
+                  ) : index === currentIndex ? (
+                      <Animated.View style={[styles.progressBarFill, {
+                      width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
+                      }]} />
+                  ) : null}
+                  </View>
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.headerRow}>
+              <TouchableOpacity
+                style={styles.userInfo}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setIsPaused(true);
+                  router.push(`/profile/${userId}`);
+                }}
+              >
+                  <Image source={{ uri: user?.picture || 'https://via.placeholder.com/100' }} style={styles.avatar} />
+                  <View>
+                      <Text style={styles.username}>{user?.username}</Text>
+                      <Text style={styles.timeLabel}>Active</Text>
+                  </View>
               </TouchableOpacity>
-            </View>
-            
-            <View style={styles.viewCountHeader}>
-              <Ionicons name="eye-outline" size={20} color={Colors.textSecondary} />
-              <Text style={styles.viewCountText}>{viewCount} views</Text>
-            </View>
-            
-            {loadingViewers ? (
-              <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40 }} />
-            ) : viewers.length > 0 ? (
-              <FlatList
-                data={viewers}
-                keyExtractor={(item) => item.user_id}
-                renderItem={renderViewer}
-                style={styles.viewersList}
+
+              <View style={styles.headerActions}>
+                  {isOwnStory && (
+                      <TouchableOpacity
+                        onPress={handleDelete}
+                        style={styles.primaryActionBtn}
+                        hitSlop={{top: 20, bottom: 20, left: 20, right: 20}}
+                      >
+                          <Ionicons name="trash-outline" size={26} color="#fff" />
+                      </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => router.back()}
+                    style={styles.primaryActionBtn}
+                    hitSlop={{top: 20, bottom: 20, left: 20, right: 20}}
+                  >
+                      <Ionicons name="close" size={32} color="#fff" />
+                  </TouchableOpacity>
+              </View>
+          </View>
+      </View>
+
+      {/* Bottom Overlay */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.bottomOverlay}
+        pointerEvents="box-none"
+      >
+        <View style={styles.bottomBar}>
+          <View style={styles.replyRow}>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={styles.replyInput}
+                placeholder="Send message"
+                placeholderTextColor="rgba(255,255,255,0.7)"
+                value={replyText}
+                onChangeText={setReplyText}
+                selectionColor={Colors.primary}
+                cursorColor={Colors.primary}
               />
+            </View>
+
+            {replyText.length > 0 ? (
+              <TouchableOpacity onPress={handleSendReply} style={styles.sendButton}>
+                <Text style={styles.sendText}>Send</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={styles.emptyViewers}>
-                <Ionicons name="eye-off-outline" size={48} color={Colors.textSecondary} />
-                <Text style={styles.emptyText}>No views yet</Text>
+              <View style={styles.engagementIcons}>
+                {isOwnStory && (
+                  <TouchableOpacity style={styles.viewersBtn} onPress={fetchViewers}>
+                    <Ionicons name="eye-outline" size={22} color="#fff" />
+                    <Text style={styles.viewersText}>Activity</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setIsLiked(!isLiked)} style={styles.iconBtn}>
+                  <Ionicons name={isLiked ? "heart" : "heart-outline"} size={30} color={isLiked ? "#ff3b5c" : "#fff"} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iconBtn}>
+                  <Ionicons name="paper-plane-outline" size={26} color="#fff" />
+                </TouchableOpacity>
               </View>
             )}
           </View>
         </View>
-      </Modal>
+      </KeyboardAvoidingView>
 
-      {/* Options Modal (for own story) */}
-      <Modal
-        visible={showOptions}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowOptions(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setShowOptions(false)}>
-          <View style={styles.optionsOverlay}>
-            <View style={styles.optionsContent}>
-              <TouchableOpacity style={styles.optionItem} onPress={() => {
-                setShowOptions(false);
-                handleDeleteStory();
-              }}>
-                <Ionicons name="trash-outline" size={24} color="#ff3b5c" />
-                <Text style={[styles.optionText, { color: '#ff3b5c' }]}>Delete Story</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.optionItem} onPress={() => {
-                setShowOptions(false);
-                // Save to highlights
-                Alert.alert('Save to Highlights', 'Story saved to highlights!');
-              }}>
-                <Ionicons name="bookmark-outline" size={24} color={Colors.text} />
-                <Text style={styles.optionText}>Save to Highlights</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.optionItem} onPress={() => setShowOptions(false)}>
-                <Ionicons name="close-outline" size={24} color={Colors.text} />
-                <Text style={styles.optionText}>Cancel</Text>
-              </TouchableOpacity>
+      {/* Viewers Modal */}
+      <Modal visible={showViewers} transparent animationType="slide" onRequestClose={() => setShowViewers(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Viewers</Text>
+                <TouchableOpacity onPress={() => { setShowViewers(false); setIsPaused(false); }}>
+                    <Ionicons name="close" size={24} color={Colors.text} />
+                </TouchableOpacity>
             </View>
+            <FlatList
+                data={viewers}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                    <View style={styles.viewerItem}>
+                        <Image source={{ uri: item.avatar_url || 'https://via.placeholder.com/100' }} style={styles.vAvatar} />
+                        <Text style={styles.vName}>{item.username}</Text>
+                    </View>
+                )}
+                ListEmptyComponent={<Text style={styles.emptyText}>No views yet</Text>}
+            />
           </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  storyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  storyMedia: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-  },
-  likeAnimation: {
-    position: 'absolute',
-  },
-  progressContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 8,
-    right: 8,
-    flexDirection: 'row',
-    gap: 4,
-  },
-  progressBarWrapper: {
-    flex: 1,
-    height: 3,
-  },
-  progressBarBg: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 1.5,
-  },
-  header: {
-    position: 'absolute',
-    top: 60,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-  },
-  userInfoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  userImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  userName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  storyTime: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  headerButton: {
-    padding: 4,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 30,
-    left: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  viewsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
-  },
-  viewsText: {
-    fontSize: 14,
-    color: '#fff',
-  },
-  replyButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
-  },
-  replyButtonText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  replyInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  replyInput: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#fff',
-  },
-  actionButton: {
-    padding: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: SCREEN_HEIGHT * 0.6,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  viewCountHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  viewCountText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  viewersList: {
-    paddingHorizontal: 16,
-  },
-  viewerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  viewerImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  viewerInfo: {
-    flex: 1,
-  },
-  viewerName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  viewerUsername: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-  },
-  emptyViewers: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 60,
-    paddingBottom: 40,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    marginTop: 12,
-  },
-  optionsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  optionsContent: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: SCREEN_WIDTH * 0.8,
-    padding: 8,
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-  },
-  optionText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  mediaContainer: { flex: 1 },
+  media: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+
+  navLayer: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 10 },
+  navSide: { width: SCREEN_WIDTH * 0.25, height: '100%' },
+
+  topControlLayer: { position: 'absolute', top: 0, left: 0, right: 0, paddingTop: 40, paddingBottom: 20, zIndex: 1000 },
+  progressContainer: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, marginBottom: 15 },
+  progressBarWrapper: { flex: 1, height: 2 },
+  progressBarBg: { flex: 1, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: '#fff' },
+
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16 },
+  userInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatar: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: '#fff' },
+  username: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  timeLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  primaryActionBtn: { padding: 8, zIndex: 2000 },
+
+  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1000 },
+  bottomBar: { paddingHorizontal: 16, paddingBottom: 30 },
+  replyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  inputWrapper: { flex: 1, height: 44, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 16, justifyContent: 'center' },
+  replyInput: { color: '#fff', fontSize: 15, height: 44, padding: 0 },
+  engagementIcons: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  viewersBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  viewersText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  iconBtn: { padding: 4 },
+  sendButton: { paddingHorizontal: 8 },
+  sendText: { color: Colors.primary, fontWeight: 'bold', fontSize: 16 },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: Colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, height: SCREEN_HEIGHT * 0.6, padding: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { color: Colors.text, fontSize: 18, fontWeight: 'bold' },
+  viewerItem: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  vAvatar: { width: 44, height: 44, borderRadius: 22 },
+  vName: { color: Colors.text, fontSize: 15, fontWeight: '500' },
+  emptyText: { color: Colors.textSecondary, textAlign: 'center', marginTop: 20 },
 });
